@@ -141,7 +141,7 @@ func (h *harness) get(t *testing.T, path string, out any) int {
 	if err != nil {
 		t.Fatalf("GET %s: %v", path, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, _ := io.ReadAll(resp.Body)
 	if out != nil && resp.StatusCode == http.StatusOK {
 		if err := json.Unmarshal(body, out); err != nil {
@@ -157,7 +157,7 @@ func (h *harness) text(t *testing.T, path string) (string, int) {
 	if err != nil {
 		t.Fatalf("GET %s: %v", path, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, _ := io.ReadAll(resp.Body)
 	return string(body), resp.StatusCode
 }
@@ -385,7 +385,7 @@ func TestAPISurvivesADownDatabase(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusServiceUnavailable {
 		t.Errorf("status = %d, want 503", resp.StatusCode)
 	}

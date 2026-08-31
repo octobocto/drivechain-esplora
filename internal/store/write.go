@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
@@ -244,7 +245,7 @@ func (s *Store) Rollback(ctx context.Context, height uint32) error {
 		err := tx.QueryRow(ctx,
 			`SELECT hash FROM blocks WHERE height = $1`, int32(height)).Scan(&hash)
 		switch {
-		case err == pgx.ErrNoRows:
+		case errors.Is(err, pgx.ErrNoRows):
 			_, err = tx.Exec(ctx,
 				`UPDATE sync_state SET tip_height = NULL, tip_hash = NULL WHERE id = 1`)
 		case err != nil:
@@ -285,7 +286,7 @@ func (s *Store) HashAt(ctx context.Context, height uint32) (chain.Hash, bool, er
 	var raw []byte
 	err := s.pool.QueryRow(ctx,
 		`SELECT hash FROM blocks WHERE height = $1`, int32(height)).Scan(&raw)
-	if err == pgx.ErrNoRows {
+	if errors.Is(err, pgx.ErrNoRows) {
 		return chain.Hash{}, false, nil
 	}
 	if err != nil {
@@ -304,7 +305,7 @@ func (s *Store) Init(ctx context.Context, chainName string, network chain.Networ
 		var haveChain, haveNetwork string
 		err := tx.QueryRow(ctx,
 			`SELECT chain, network FROM sync_state WHERE id = 1`).Scan(&haveChain, &haveNetwork)
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, pgx.ErrNoRows) {
 			_, err = tx.Exec(ctx,
 				`INSERT INTO sync_state (id, chain, network) VALUES (1, $1, $2)`,
 				chainName, string(network))

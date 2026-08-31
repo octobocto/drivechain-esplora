@@ -107,7 +107,7 @@ func scanBlock(row scannable) (BlockRow, error) {
 		count  int32
 	)
 	err := row.Scan(&height, &hash, &prev, &merkle, &main, &out.BlockTime, &count)
-	if err == pgx.ErrNoRows {
+	if errors.Is(err, pgx.ErrNoRows) {
 		return BlockRow{}, ErrNotFound
 	}
 	if err != nil {
@@ -165,7 +165,7 @@ func (s *Store) Tx(ctx context.Context, txid chain.Hash) (TxRow, error) {
 		`SELECT t.height, t.tx_index, t.size_bytes, t.fee_sats, t.raw
 		 FROM txs t WHERE t.txid = $1`, txid[:]).
 		Scan(&height, &index, &size, &out.FeeSats, &out.Raw)
-	if err == pgx.ErrNoRows {
+	if errors.Is(err, pgx.ErrNoRows) {
 		return TxRow{}, ErrNotFound
 	}
 	if err != nil {
