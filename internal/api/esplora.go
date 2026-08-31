@@ -94,6 +94,11 @@ type UTXO struct {
 	// HeightExact is false for a deposit the node could not attribute to a
 	// block. Such a row carries the height where the index first saw it.
 	HeightExact bool `json:"height_exact"`
+	// ContentType names the payload the output carries, such as a value or a
+	// withdrawal. A wallet spends only a plain value.
+	ContentType string `json:"content_type"`
+	// Content is the chain-specific payload.
+	Content json.RawMessage `json:"content,omitempty"`
 }
 
 // Outspend answers /tx/{txid}/outspend/{vout}.
@@ -195,6 +200,8 @@ func newUTXO(u store.UTXO) UTXO {
 		Status:       newStatus(u.Height, u.BlockHash, u.BlockTime),
 		OutpointKind: u.OutPoint.Kind.String(),
 		HeightExact:  u.HeightExact,
+		ContentType:  u.ContentType,
+		Content:      u.Content,
 	}
 }
 
