@@ -145,3 +145,56 @@ func TestInputRoundTrip(t *testing.T) {
 		t.Errorf("round trip = %+v, want %+v", got, want)
 	}
 }
+
+// The node serializes a Rust tuple, so a deposit and a bundle spend arrive as
+// two element pairs, not as objects. A real node caught this; a hand written
+// fixture did not.
+func TestBlockIndexDecodesTuplePairs(t *testing.T) {
+	const wire = `{
+		"txs": [{"txid":"` + testHashHex + `","size":180,"raw":"0102"}],
+		"deposits": [
+			[{"Deposit":"` + testHashHex + `:0"},
+			 {"address":"pEbmSWqJdBuPadRGm8tDY4USQK","content":{"Value":500000000}}]
+		],
+		"bundle_spends": [
+			[{"Regular":{"txid":"` + testHashHex + `","vout":2}}, "` + testHashHex + `"]
+		]
+	}`
+
+	var index BlockIndex
+	if err := json.Unmarshal([]byte(wire), &index); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	if len(index.Txs) != 1 || index.Txs[0].Size != 180 {
+		t.Errorf("txs = %+v", index.Txs)
+	}
+	if len(index.Deposits) != 1 {
+		t.Fatalf("got %d deposits, want 1", len(index.Deposits))
+	}
+	if index.Deposits[0].OutPoint.Kind != KindDeposit {
+		t.Errorf("deposit outpoint kind = %s, want deposit", index.Deposits[0].OutPoint.Kind)
+	}
+	if len(index.BundleSpends) != 1 {
+		t.Fatalf("got %d bundle spends, want 1", len(index.BundleSpends))
+	}
+	if index.BundleSpends[0].OutPoint.Vout != 2 {
+		t.Errorf("bundle spend vout = %d, want 2", index.BundleSpends[0].OutPoint.Vout)
+	}
+
+	// The encoder must produce the same pair form, or the test node lies.
+	raw, err := json.Marshal(index.Deposits[0])
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	if raw[0] != '[' {
+		t.Errorf("encoded a deposit as %s, want a pair", raw)
+	}
+}
+
+func TestPairRejectsAWrongLength(t *testing.T) {
+	var d Deposit
+	if err := json.Unmarshal([]byte(`[{"Regular":{"txid":"`+testHashHex+`","vout":0}}]`), &d); err == nil {
+		t.Fatal("want an error for a one element pair, got none")
+	}
+}

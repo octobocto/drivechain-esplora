@@ -130,14 +130,50 @@ type BlockIndex struct {
 	BundleSpends []BundleSpend `json:"bundle_spends"`
 }
 
-// Deposit is one output a mainchain deposit created.
+// Deposit is one output a mainchain deposit created. The node sends a pair,
+// not an object, because it serializes a Rust tuple.
 type Deposit struct {
-	OutPoint OutPoint `json:"outpoint"`
-	Output   Output   `json:"output"`
+	OutPoint OutPoint
+	Output   Output
 }
 
-// BundleSpend is one output a withdrawal bundle removed.
+func (d *Deposit) UnmarshalJSON(data []byte) error {
+	return decodePair(data, "deposit", &d.OutPoint, &d.Output)
+}
+
+func (d Deposit) MarshalJSON() ([]byte, error) {
+	return json.Marshal([]any{d.OutPoint, d.Output})
+}
+
+// BundleSpend is one output a withdrawal bundle removed. It is a pair for the
+// same reason.
 type BundleSpend struct {
-	OutPoint OutPoint    `json:"outpoint"`
-	M6id     BitcoinHash `json:"m6id"`
+	OutPoint OutPoint
+	M6id     BitcoinHash
+}
+
+func (b *BundleSpend) UnmarshalJSON(data []byte) error {
+	return decodePair(data, "bundle spend", &b.OutPoint, &b.M6id)
+}
+
+func (b BundleSpend) MarshalJSON() ([]byte, error) {
+	return json.Marshal([]any{b.OutPoint, b.M6id})
+}
+
+// decodePair reads a two element JSON array into two values.
+func decodePair(data []byte, what string, first, second any) error {
+	var pair []json.RawMessage
+	if err := json.Unmarshal(data, &pair); err != nil {
+		return fmt.Errorf("decode %s pair: %w", what, err)
+	}
+	if len(pair) != 2 {
+		return fmt.Errorf("%s pair has %d elements, want 2", what, len(pair))
+	}
+	if err := json.Unmarshal(pair[0], first); err != nil {
+		return fmt.Errorf("decode %s outpoint: %w", what, err)
+	}
+	if err := json.Unmarshal(pair[1], second); err != nil {
+		return fmt.Errorf("decode %s value: %w", what, err)
+	}
+	return nil
 }

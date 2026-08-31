@@ -4,6 +4,8 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"strconv"
+	"strings"
 )
 
 // OutPointKind tags which of the three ways an output came into being. The
@@ -90,10 +92,9 @@ type outPointWire struct {
 		MerkleRoot Hash   `json:"merkle_root"`
 		Vout       uint32 `json:"vout"`
 	} `json:"Coinbase,omitempty"`
-	Deposit *struct {
-		Txid BitcoinHash `json:"txid"`
-		Vout uint32      `json:"vout"`
-	} `json:"Deposit,omitempty"`
+	// A deposit names a mainchain outpoint, which rust-bitcoin renders as one
+	// "txid:vout" string rather than as an object.
+	Deposit *string `json:"Deposit,omitempty"`
 }
 
 func (o *OutPoint) UnmarshalJSON(data []byte) error {
@@ -107,7 +108,11 @@ func (o *OutPoint) UnmarshalJSON(data []byte) error {
 	case wire.Coinbase != nil:
 		*o = OutPoint{Kind: KindCoinbase, Source: wire.Coinbase.MerkleRoot, Vout: wire.Coinbase.Vout}
 	case wire.Deposit != nil:
-		*o = OutPoint{Kind: KindDeposit, Source: Hash(wire.Deposit.Txid), Vout: wire.Deposit.Vout}
+		parsed, err := parseBitcoinOutPoint(*wire.Deposit)
+		if err != nil {
+			return err
+		}
+		*o = parsed
 	default:
 		return fmt.Errorf("outpoint %s names no known variant", data)
 	}
@@ -128,14 +133,29 @@ func (o OutPoint) MarshalJSON() ([]byte, error) {
 			Vout       uint32 `json:"vout"`
 		}{MerkleRoot: o.Source, Vout: o.Vout}
 	case KindDeposit:
-		wire.Deposit = &struct {
-			Txid BitcoinHash `json:"txid"`
-			Vout uint32      `json:"vout"`
-		}{Txid: BitcoinHash(o.Source), Vout: o.Vout}
+		text := fmt.Sprintf("%s:%d", BitcoinHash(o.Source), o.Vout)
+		wire.Deposit = &text
 	default:
 		return nil, fmt.Errorf("cannot encode outpoint of kind %d", uint8(o.Kind))
 	}
 	return json.Marshal(wire)
+}
+
+// parseBitcoinOutPoint reads the "txid:vout" form of a mainchain outpoint.
+func parseBitcoinOutPoint(text string) (OutPoint, error) {
+	txidHex, voutText, found := strings.Cut(text, ":")
+	if !found {
+		return OutPoint{}, fmt.Errorf("mainchain outpoint %q has no vout", text)
+	}
+	vout, err := strconv.ParseUint(voutText, 10, 32)
+	if err != nil {
+		return OutPoint{}, fmt.Errorf("mainchain outpoint %q has a bad vout: %w", text, err)
+	}
+	var txid BitcoinHash
+	if err := json.Unmarshal([]byte(`"`+txidHex+`"`), &txid); err != nil {
+		return OutPoint{}, fmt.Errorf("mainchain outpoint %q: %w", text, err)
+	}
+	return OutPoint{Kind: KindDeposit, Source: Hash(txid), Vout: uint32(vout)}, nil
 }
 
 // InPointKind tags how an output left the UTXO set.

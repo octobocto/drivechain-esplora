@@ -86,8 +86,10 @@ func TestOutPointJSON(t *testing.T) {
 			want: OutPoint{Kind: KindCoinbase, Vout: 0},
 		},
 		{
-			name: "deposit reverses the mainchain txid",
-			wire: `{"Deposit":{"txid":"` + mainHex + `","vout":1}}`,
+			// rust-bitcoin renders a mainchain outpoint as one "txid:vout"
+			// string, in reversed byte order. A real node proved this.
+			name: "deposit is a txid:vout string in mainchain order",
+			wire: `{"Deposit":"` + mainHex + `:1"}`,
 			want: OutPoint{Kind: KindDeposit, Vout: 1},
 		},
 	}
@@ -152,5 +154,18 @@ func TestInPointJSON(t *testing.T) {
 	}
 	if want := (InPoint{Kind: SpendWithdrawal, Source: source}); bundle != want {
 		t.Errorf("withdrawal = %+v, want %+v", bundle, want)
+	}
+}
+
+func TestDepositOutPointRejectsBadText(t *testing.T) {
+	for _, wire := range []string{
+		`{"Deposit":"nocolon"}`,
+		`{"Deposit":"0102:notanumber"}`,
+		`{"Deposit":"tooshort:0"}`,
+	} {
+		var out OutPoint
+		if err := json.Unmarshal([]byte(wire), &out); err == nil {
+			t.Errorf("want an error for %s, got none", wire)
+		}
 	}
 }
