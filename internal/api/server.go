@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"github.com/octobocto/drivechain-esplora/internal/chain"
+	"github.com/octobocto/drivechain-esplora/internal/mainchain"
 	"github.com/octobocto/drivechain-esplora/internal/service"
 	"github.com/octobocto/drivechain-esplora/internal/store"
 )
@@ -27,10 +28,19 @@ type Broadcaster interface {
 	Broadcast(ctx context.Context, tx json.RawMessage) (chain.Hash, error)
 }
 
+// Mainchain reads the BIP300 view of the mainchain. A deployment with no
+// enforcer behind it leaves this nil, and the drivechain routes then answer
+// that they have no source.
+type Mainchain interface {
+	Sidechains(ctx context.Context) ([]mainchain.Sidechain, error)
+	Ctip(ctx context.Context, slot uint32) (mainchain.Ctip, bool, error)
+}
+
 // Server answers Esplora requests from the index.
 type Server struct {
 	stores      *service.Service[*store.Store]
 	broadcaster Broadcaster
+	mainchain   Mainchain
 	log         *slog.Logger
 }
 
@@ -39,9 +49,10 @@ type Server struct {
 func NewServer(
 	stores *service.Service[*store.Store],
 	broadcaster Broadcaster,
+	mainchain Mainchain,
 	log *slog.Logger,
 ) *Server {
-	return &Server{stores: stores, broadcaster: broadcaster, log: log}
+	return &Server{stores: stores, broadcaster: broadcaster, mainchain: mainchain, log: log}
 }
 
 // Handler builds the router.
@@ -87,6 +98,12 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /mempool/txids", s.emptyList)
 	mux.HandleFunc("GET /mempool/recent", s.emptyList)
 	mux.HandleFunc("GET /fee-estimates", s.feeEstimates)
+
+	// A sidechain lives inside the mainchain's hashrate escrow. These read that
+	// escrow, so a wallet with no local node still sees which chains exist and
+	// what each treasury holds.
+	mux.HandleFunc("GET /drivechain/sidechains", s.drivechainSidechains)
+	mux.HandleFunc("GET /drivechain/sidechain/{slot}", s.drivechainSidechain)
 
 	mux.HandleFunc("GET /health", s.health)
 

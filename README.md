@@ -71,6 +71,30 @@ GET  /scripthash/{h}           and the same four scripthash routes
 GET  /fee-estimates
 ```
 
+### Drivechain
+
+A sidechain lives inside the mainchain's hashrate escrow, and only the mainchain
+knows which slots activated or what each treasury holds. These routes read that,
+so a wallet with no local node still sees it:
+
+```
+GET /drivechain/sidechains        every activated slot, in slot order
+GET /drivechain/sidechain/{slot}  one slot
+```
+
+Each answers the slot, the title and description from its M1 declaration, the
+vote count, the proposal and activation heights, and the treasury. A slot the
+mainchain holds no treasury for answers `"treasury": null`, never zero sats, so
+a caller can tell "nothing deposited yet" from "a treasury holding nothing".
+
+The treasury carries the CTIP, which is the outpoint a deposit spends. A wallet
+needs it to build an M5.
+
+These routes read through to a bip300301 enforcer named by `--enforcer-url`,
+rather than indexing the mainchain here. They are therefore only as available as
+that enforcer. A deployment with no enforcer serves every other route and
+answers 503 on these two.
+
 ### Deposits
 
 A deposit enters a sidechain from the mainchain, so it keys on a mainchain

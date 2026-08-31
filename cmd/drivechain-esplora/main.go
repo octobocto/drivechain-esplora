@@ -18,6 +18,7 @@ import (
 	"github.com/octobocto/drivechain-esplora/internal/chain"
 	_ "github.com/octobocto/drivechain-esplora/internal/chain/register"
 	"github.com/octobocto/drivechain-esplora/internal/index"
+	"github.com/octobocto/drivechain-esplora/internal/mainchain"
 	"github.com/octobocto/drivechain-esplora/internal/rpc"
 	"github.com/octobocto/drivechain-esplora/internal/service"
 	"github.com/octobocto/drivechain-esplora/internal/store"
@@ -30,6 +31,7 @@ type config struct {
 	chainName   string
 	network     string
 	nodeURL     string
+	enforcerURL string
 	databaseURL string
 	listen      string
 	logLevel    string
@@ -119,9 +121,18 @@ func run() error {
 		}
 	}()
 
+	// The enforcer holds the mainchain's view of every sidechain. Without one
+	// the index still serves its own chain, and the drivechain routes say they
+	// have no source.
+	var enforcer api.Mainchain
+	if cfg.enforcerURL != "" {
+		enforcer = mainchain.New(cfg.enforcerURL)
+		log.Info("reading the sidechain escrow", "enforcer", cfg.enforcerURL)
+	}
+
 	server := &http.Server{
 		Addr:              listen,
-		Handler:           api.NewServer(stores, index.NewBroadcaster(nodes), log).Handler(),
+		Handler:           api.NewServer(stores, index.NewBroadcaster(nodes), enforcer, log).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
@@ -162,6 +173,8 @@ func readConfig() (config, error) {
 		"postgres connection string, default DATABASE_URL")
 	flag.StringVar(&cfg.listen, "listen", "",
 		"listen address, default the chain's port for the network")
+	flag.StringVar(&cfg.enforcerURL, "enforcer-url", "",
+		"bip300301 enforcer to read the sidechain escrow from; empty serves no drivechain routes")
 	flag.StringVar(&cfg.logLevel, "log-level", "info", "debug, info, warn, or error")
 	flag.Parse()
 
