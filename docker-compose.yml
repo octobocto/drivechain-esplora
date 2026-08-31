@@ -1,0 +1,29 @@
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: esplora
+      POSTGRES_PASSWORD: esplora
+      POSTGRES_DB: thunder
+    volumes: ["esplora-data:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U esplora"]
+      interval: 5s
+      retries: 10
+
+  esplora:
+    build: .
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # The node runs on the host. Neither it nor the database has to be up when
+    # this container starts.
+    network_mode: host
+    command:
+      - --chain=thunder
+      - --network=signet
+      - --listen=0.0.0.0:3009
+      - --database-url=postgres://esplora:esplora@127.0.0.1:5432/thunder?sslmode=disable
+
+volumes:
+  esplora-data:
