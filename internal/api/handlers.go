@@ -9,6 +9,7 @@ import (
 	"strconv"
 
 	"github.com/octobocto/drivechain-esplora/internal/chain"
+	"github.com/octobocto/drivechain-esplora/internal/mainchain"
 	"github.com/octobocto/drivechain-esplora/internal/service"
 	"github.com/octobocto/drivechain-esplora/internal/store"
 )
@@ -446,4 +447,91 @@ func parseUint32(raw string) (uint32, error) {
 		return 0, fmt.Errorf("%q is not a whole number", raw)
 	}
 	return uint32(v), nil
+}
+
+// SidechainInfo is one slot of the mainchain's hashrate escrow.
+type SidechainInfo struct {
+	Slot             uint32 `json:"slot"`
+	Title            string `json:"title"`
+	Description      string `json:"description"`
+	VoteCount        uint32 `json:"vote_count"`
+	ProposalHeight   uint32 `json:"proposal_height"`
+	ActivationHeight uint32 `json:"activation_height"`
+	// Treasury names the output that holds the sidechain's coins. A deposit
+	// spends it, so a wallet with no node reads it here.
+	Treasury *Treasury `json:"treasury"`
+}
+
+// Treasury is a sidechain's CTIP: what it holds, and the outpoint holding it.
+type Treasury struct {
+	Txid      string `json:"txid"`
+	Vout      uint32 `json:"vout"`
+	ValueSats int64  `json:"value_sats"`
+}
+
+func (s *Server) drivechainSidechains(w http.ResponseWriter, r *http.Request) {
+	if s.mainchain == nil {
+		writeError(w, http.StatusServiceUnavailable, "this index reads no mainchain")
+		return
+	}
+	chains, err := s.mainchain.Sidechains(r.Context())
+	if err != nil {
+		s.log.Warn("read the sidechains", "error", err)
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+
+	out := make([]SidechainInfo, 0, len(chains))
+	for _, c := range chains {
+		out = append(out, s.sidechainInfo(r, c))
+	}
+	writeJSON(w, out)
+}
+
+func (s *Server) drivechainSidechain(w http.ResponseWriter, r *http.Request) {
+	if s.mainchain == nil {
+		writeError(w, http.StatusServiceUnavailable, "this index reads no mainchain")
+		return
+	}
+	slot, err := strconv.ParseUint(r.PathValue("slot"), 10, 8)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "the slot must be a number from 0 to 255")
+		return
+	}
+	chains, err := s.mainchain.Sidechains(r.Context())
+	if err != nil {
+		s.log.Warn("read the sidechains", "error", err)
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	for _, c := range chains {
+		if c.Slot == uint32(slot) {
+			writeJSON(w, s.sidechainInfo(r, c))
+			return
+		}
+	}
+	writeError(w, http.StatusNotFound, "no sidechain holds that slot")
+}
+
+// sidechainInfo reads one chain's treasury alongside its declaration. A slot
+// with no treasury yet answers with none rather than a zero balance, so a
+// caller can tell "nothing deposited" from "zero sats".
+func (s *Server) sidechainInfo(r *http.Request, c mainchain.Sidechain) SidechainInfo {
+	info := SidechainInfo{
+		Slot:             c.Slot,
+		Title:            c.Title,
+		Description:      c.Description,
+		VoteCount:        c.VoteCount,
+		ProposalHeight:   c.ProposalHeight,
+		ActivationHeight: c.ActivationHeight,
+	}
+	ctip, ok, err := s.mainchain.Ctip(r.Context(), c.Slot)
+	if err != nil {
+		s.log.Warn("read the treasury", "slot", c.Slot, "error", err)
+		return info
+	}
+	if ok {
+		info.Treasury = &Treasury{Txid: ctip.Txid, Vout: ctip.Vout, ValueSats: ctip.ValueSats}
+	}
+	return info
 }
