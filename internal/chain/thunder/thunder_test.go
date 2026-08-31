@@ -62,3 +62,25 @@ func TestDecodeContentRejectsOverflow(t *testing.T) {
 		t.Fatal("want an overflow error, got none")
 	}
 }
+
+// The node writes a withdrawal as value and main_fee. One serializer renames
+// them, so both spellings must read the same amount.
+func TestDecodeWithdrawalTakesEitherSpelling(t *testing.T) {
+	cases := map[string]string{
+		"as the node writes it": `{"Withdrawal":{"value":1000,"main_fee":250,
+			"main_address":"tb1q"}}`,
+		"with the renamed fields": `{"Withdrawal":{"value_sats":1000,
+			"main_fee_sats":250,"main_address":"tb1q"}}`,
+	}
+	for name, raw := range cases {
+		t.Run(name, func(t *testing.T) {
+			got, err := Decoder{}.DecodeContent([]byte(raw))
+			if err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+			if got.ValueSats != 1250 {
+				t.Errorf("ValueSats = %d, want 1250", got.ValueSats)
+			}
+		})
+	}
+}

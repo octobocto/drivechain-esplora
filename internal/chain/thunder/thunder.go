@@ -16,8 +16,12 @@ type Decoder struct{}
 func (Decoder) Name() string { return "thunder" }
 
 type content struct {
-	Value      *uint64 `json:"Value,omitempty"`
+	Value *uint64 `json:"Value,omitempty"`
+	// A withdrawal names its amounts as value and main_fee. One serializer
+	// renames them to value_sats and main_fee_sats, so both spellings decode.
 	Withdrawal *struct {
+		Value       uint64 `json:"value"`
+		MainFee     uint64 `json:"main_fee"`
 		ValueSats   uint64 `json:"value_sats"`
 		MainFeeSats uint64 `json:"main_fee_sats"`
 		MainAddress string `json:"main_address"`
@@ -40,11 +44,13 @@ func (Decoder) DecodeContent(raw json.RawMessage) (chain.Content, error) {
 		}
 		return chain.Content{ValueSats: sats, Type: "value"}, nil
 	case c.Withdrawal != nil:
-		total := c.Withdrawal.ValueSats + c.Withdrawal.MainFeeSats
-		if total < c.Withdrawal.ValueSats {
+		value := max(c.Withdrawal.Value, c.Withdrawal.ValueSats)
+		mainFee := max(c.Withdrawal.MainFee, c.Withdrawal.MainFeeSats)
+		total := value + mainFee
+		if total < value {
 			return chain.Content{}, fmt.Errorf(
 				"withdrawal of %d sats plus fee %d sats overflows",
-				c.Withdrawal.ValueSats, c.Withdrawal.MainFeeSats)
+				value, mainFee)
 		}
 		sats, err := toSats(total)
 		if err != nil {
