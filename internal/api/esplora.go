@@ -50,6 +50,9 @@ type Vout struct {
 	// OutpointKind names how the output came into being: regular, coinbase,
 	// or deposit. Bitcoin has no such distinction.
 	OutpointKind string `json:"outpoint_kind"`
+	// ContentType names the payload the output carries, such as a value or a
+	// withdrawal. A wallet counts only a plain value as its own.
+	ContentType string `json:"content_type"`
 	// Content is the chain-specific payload, such as a withdrawal.
 	Content json.RawMessage `json:"content,omitempty"`
 }
@@ -159,6 +162,7 @@ func newVout(c store.Coin) Vout {
 		ScriptPubKeyAddress: c.Address.String(),
 		Value:               c.ValueSats,
 		OutpointKind:        c.OutPoint.Kind.String(),
+		ContentType:         c.ContentType,
 		Content:             c.Content,
 	}
 }
