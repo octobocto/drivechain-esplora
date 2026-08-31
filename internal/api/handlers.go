@@ -307,7 +307,7 @@ func (s *Server) broadcast(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "no node connection for a broadcast")
 		return
 	}
-	raw, err := readHexBody(r)
+	raw, err := readTransactionBody(r)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return

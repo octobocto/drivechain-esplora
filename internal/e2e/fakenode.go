@@ -19,6 +19,9 @@ type FakeNode struct {
 	chainT []chain.Hash
 	blocks map[chain.Hash]*chain.Block
 	index  map[chain.Hash]chain.BlockIndex
+	// submitted holds every transaction a broadcast handed over, so a test
+	// reads what reached the node.
+	submitted []json.RawMessage
 
 	server *httptest.Server
 }
@@ -35,6 +38,13 @@ func NewFakeNode() *FakeNode {
 
 // URL is the node address.
 func (n *FakeNode) URL() string { return n.server.URL }
+
+// Submitted lists the transactions a broadcast handed over, in order.
+func (n *FakeNode) Submitted() []json.RawMessage {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return append([]json.RawMessage(nil), n.submitted...)
+}
 
 // Close stops the listener.
 func (n *FakeNode) Close() { n.server.Close() }
@@ -126,6 +136,14 @@ func (n *FakeNode) dispatch(req request) (any, error) {
 			return nil, fmt.Errorf("no index for block %s", hash)
 		}
 		return index, nil
+
+	case "submit_transaction":
+		var params []json.RawMessage
+		if err := json.Unmarshal(req.Params, &params); err != nil || len(params) != 1 {
+			return nil, fmt.Errorf("submit_transaction takes one transaction")
+		}
+		n.submitted = append(n.submitted, params[0])
+		return chain.Hash{1, 2, 3}.String(), nil
 
 	default:
 		return nil, fmt.Errorf("method %q is not served", req.Method)

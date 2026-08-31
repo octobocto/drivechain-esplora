@@ -2,14 +2,14 @@ package index
 
 import (
 	"context"
-	"encoding/hex"
+	"encoding/json"
 	"fmt"
 
 	"github.com/octobocto/drivechain-esplora/internal/chain"
 	"github.com/octobocto/drivechain-esplora/internal/service"
 )
 
-// Broadcaster hands a raw transaction to the node.
+// Broadcaster hands a signed transaction to the node.
 type Broadcaster struct {
 	nodes *service.Service[*chain.Node]
 }
@@ -19,14 +19,14 @@ func NewBroadcaster(nodes *service.Service[*chain.Node]) *Broadcaster {
 	return &Broadcaster{nodes: nodes}
 }
 
-// Broadcast submits one authorized transaction and returns its txid. The body
-// is the borsh encoding of an authorized transaction, as hex.
-func (b *Broadcaster) Broadcast(ctx context.Context, raw []byte) (chain.Hash, error) {
+// Broadcast submits one authorized transaction and returns its txid. The
+// transaction arrives as the JSON a node reads, and travels on unchanged.
+func (b *Broadcaster) Broadcast(ctx context.Context, tx json.RawMessage) (chain.Hash, error) {
 	node, err := b.nodes.Get(ctx)
 	if err != nil {
 		return chain.Hash{}, err
 	}
-	txid, err := node.SubmitTransaction(ctx, hex.EncodeToString(raw))
+	txid, err := node.SubmitTransaction(ctx, tx)
 	if err != nil {
 		b.nodes.Drop()
 		return chain.Hash{}, fmt.Errorf("submit transaction: %w", err)

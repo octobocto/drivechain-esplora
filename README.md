@@ -97,6 +97,11 @@ Each difference comes from the chain, not from a shortcut.
   `scriptpubkey` carries those 20 bytes as hex, `scriptpubkey_type` reads
   `sidechain_address`, and `scriptpubkey_address` carries the base58 form. The
   `/scripthash/` routes key on the sha256 of the address bytes.
+- **`POST /tx` takes JSON, not hex.** Bitcoin posts a hex raw transaction. These
+  chains have no such form: a node reads an authorized transaction as JSON, and
+  almost none of its types can borsh-decode. So the body is that JSON, and this
+  service relays it to the node unchanged. It is the one write route, and it
+  neither signs nor rewrites what it carries.
 - **There is no fee market.** `/fee-estimates` answers with one constant rather
   than an error, because a client calls it before every send.
 - **A withdrawal costs more than it pays.** A withdrawal output removes both its

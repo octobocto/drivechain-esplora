@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
@@ -93,7 +95,8 @@ func newHarness(t *testing.T) *harness {
 		return st, nil
 	}, nil)
 
-	server := httptest.NewServer(api.NewServer(stores, nil, quiet()).Handler())
+	server := httptest.NewServer(
+		api.NewServer(stores, index.NewBroadcaster(nodes), quiet()).Handler())
 	t.Cleanup(server.Close)
 
 	return &harness{
@@ -388,5 +391,54 @@ func TestAPISurvivesADownDatabase(t *testing.T) {
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusServiceUnavailable {
 		t.Errorf("status = %d, want 503", resp.StatusCode)
+	}
+}
+
+// A light wallet has no node, so it broadcasts through the index. The
+// transaction must reach the node exactly as the wallet signed it.
+func TestBroadcastReachesTheNode(t *testing.T) {
+	h := newHarness(t)
+
+	const signed = `{"transaction":{"inputs":[],"outputs":[]},"authorizations":[]}`
+	resp, err := http.Post(h.api.URL+"/tx", "application/json", strings.NewReader(signed))
+	if err != nil {
+		t.Fatalf("post the transaction: %v", err)
+	}
+	defer resp.Body.Close() //nolint:errcheck
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("POST /tx answered %d: %s", resp.StatusCode, body)
+	}
+	if len(strings.TrimSpace(string(body))) != 64 {
+		t.Errorf("POST /tx answered %q, want a txid", body)
+	}
+
+	got := h.node.Submitted()
+	if len(got) != 1 {
+		t.Fatalf("the node got %d transactions, want 1", len(got))
+	}
+	var want, have any
+	_ = json.Unmarshal([]byte(signed), &want)
+	_ = json.Unmarshal(got[0], &have)
+	if !reflect.DeepEqual(want, have) {
+		t.Errorf("the node got %s, want %s", got[0], signed)
+	}
+}
+
+// A body that is not JSON cannot be a transaction, and the caller must read
+// that rather than a node error.
+func TestBroadcastRefusesANonJSONBody(t *testing.T) {
+	h := newHarness(t)
+
+	resp, err := http.Post(h.api.URL+"/tx", "text/plain", strings.NewReader("deadbeef"))
+	if err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	defer resp.Body.Close() //nolint:errcheck
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("POST /tx answered %d, want 400", resp.StatusCode)
+	}
+	if len(h.node.Submitted()) != 0 {
+		t.Error("a bad body reached the node")
 	}
 }

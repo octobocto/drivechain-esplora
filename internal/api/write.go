@@ -1,12 +1,11 @@
 package api
 
 import (
-	"encoding/hex"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
 )
 
 // maxBroadcastBytes caps a POST /tx body.
@@ -34,17 +33,22 @@ func writeError(w http.ResponseWriter, status int, message string) {
 	_, _ = io.WriteString(w, message)
 }
 
-func readHexBody(r *http.Request) ([]byte, error) {
+// readTransactionBody reads the authorized transaction a POST /tx carries.
+//
+// Bitcoin Esplora takes a hex raw transaction here. These chains have none: a
+// node reads an authorized transaction as JSON, and only ten of its types can
+// borsh-decode. So the body is that JSON, and this service relays it.
+func readTransactionBody(r *http.Request) (json.RawMessage, error) {
 	body, err := io.ReadAll(io.LimitReader(r.Body, maxBroadcastBytes))
 	if err != nil {
 		return nil, fmt.Errorf("read the request body: %w", err)
 	}
-	raw, err := hex.DecodeString(strings.TrimSpace(string(body)))
-	if err != nil {
-		return nil, fmt.Errorf("the body must be hex: %w", err)
-	}
-	if len(raw) == 0 {
+	trimmed := bytes.TrimSpace(body)
+	if len(trimmed) == 0 {
 		return nil, fmt.Errorf("the body is empty")
 	}
-	return raw, nil
+	if !json.Valid(trimmed) {
+		return nil, fmt.Errorf("the body must be the transaction as JSON")
+	}
+	return json.RawMessage(trimmed), nil
 }

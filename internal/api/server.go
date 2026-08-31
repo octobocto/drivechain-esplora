@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"net/http"
 
@@ -21,9 +22,9 @@ const blockListSize = 10
 // chains have no fee market, and a client calls this before every send.
 const FeeRateSatPerVByte = 1.0
 
-// Broadcaster hands a raw transaction to the node.
+// Broadcaster hands a signed transaction to the node.
 type Broadcaster interface {
-	Broadcast(ctx context.Context, raw []byte) (chain.Hash, error)
+	Broadcast(ctx context.Context, tx json.RawMessage) (chain.Hash, error)
 }
 
 // Server answers Esplora requests from the index.
