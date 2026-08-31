@@ -62,13 +62,15 @@ func Prepare(
 			Txid:      info.Txid,
 			Index:     i,
 			SizeBytes: int(info.Size),
+			Raw:       info.Raw,
 		})
 
-		for _, input := range tx.Inputs {
+		for vin, input := range tx.Inputs {
 			out.Spends = append(out.Spends, store.Spend{
 				OutPoint: input.OutPoint,
 				Source:   info.Txid,
 				Kind:     chain.SpendRegular,
+				Vin:      uint32(vin),
 			})
 		}
 
@@ -101,11 +103,12 @@ func Prepare(
 		out.Creates = append(out.Creates, row)
 	}
 
-	for _, spend := range blockIndex.BundleSpends {
+	for vin, spend := range blockIndex.BundleSpends {
 		out.Spends = append(out.Spends, store.Spend{
 			OutPoint: spend.OutPoint,
 			Source:   chain.Hash(spend.M6id),
 			Kind:     chain.SpendWithdrawal,
+			Vin:      uint32(vin),
 		})
 	}
 

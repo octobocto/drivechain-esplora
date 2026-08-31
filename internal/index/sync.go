@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/octobocto/drivechain-esplora/internal/chain"
+	"github.com/octobocto/drivechain-esplora/internal/service"
 	"github.com/octobocto/drivechain-esplora/internal/store"
 )
 
@@ -18,12 +19,18 @@ type TimeSource interface {
 }
 
 // Syncer walks the chain forward and keeps the index level with the node.
+//
+// The node and the database each sit behind a service wrapper, so neither one
+// has to be up when this process starts.
 type Syncer struct {
-	node    *chain.Node
-	store   *store.Store
+	nodes   *service.Service[*chain.Node]
+	stores  *service.Service[*store.Store]
 	decoder chain.Decoder
 	times   TimeSource
 	log     *slog.Logger
+
+	node  *chain.Node
+	store *store.Store
 
 	// Interval is how long the syncer waits after it reaches the tip.
 	Interval time.Duration
@@ -31,15 +38,15 @@ type Syncer struct {
 
 // NewSyncer builds a syncer. A nil TimeSource leaves every block time empty.
 func NewSyncer(
-	node *chain.Node,
-	st *store.Store,
+	nodes *service.Service[*chain.Node],
+	stores *service.Service[*store.Store],
 	decoder chain.Decoder,
 	times TimeSource,
 	log *slog.Logger,
 ) *Syncer {
 	return &Syncer{
-		node:     node,
-		store:    st,
+		nodes:    nodes,
+		stores:   stores,
 		decoder:  decoder,
 		times:    times,
 		log:      log,
@@ -47,13 +54,17 @@ func NewSyncer(
 	}
 }
 
-// Run follows the chain until the context ends.
+// Run follows the chain until the context ends. It never returns because a
+// dependency is down; it waits and tries again.
 func (s *Syncer) Run(ctx context.Context) error {
 	for {
-		if err := s.Once(ctx); err != nil {
-			if ctx.Err() != nil {
-				return ctx.Err()
-			}
+		err := s.Once(ctx)
+		switch {
+		case ctx.Err() != nil:
+			return ctx.Err()
+		case errors.Is(err, service.ErrUnavailable):
+			s.log.Debug("waiting for a dependency", "error", err)
+		case err != nil:
 			s.log.Error("sync pass failed, retrying", "error", err)
 		}
 		select {
@@ -66,11 +77,20 @@ func (s *Syncer) Run(ctx context.Context) error {
 
 // Once walks from the index tip to the node tip one time.
 func (s *Syncer) Once(ctx context.Context) error {
+	var err error
+	if s.node, err = s.nodes.Get(ctx); err != nil {
+		return err
+	}
+	if s.store, err = s.stores.Get(ctx); err != nil {
+		return err
+	}
+
 	nodeTip, err := s.node.TipHeight(ctx)
 	if errors.Is(err, chain.ErrEmptyChain) {
 		return nil
 	}
 	if err != nil {
+		s.nodes.Drop()
 		return fmt.Errorf("read node tip: %w", err)
 	}
 

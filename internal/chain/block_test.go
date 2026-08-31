@@ -117,3 +117,31 @@ func repeatByte(n int) string {
 	}
 	return out
 }
+
+// The encoder must produce the pair the node sends, so a round trip holds.
+func TestInputRoundTrip(t *testing.T) {
+	source, err := ParseHash(testHashHex)
+	if err != nil {
+		t.Fatalf("parse hash: %v", err)
+	}
+	want := Input{
+		OutPoint: OutPoint{Kind: KindRegular, Source: source, Vout: 4},
+		LeafHash: Bytes{1, 2, 3},
+	}
+
+	raw, err := json.Marshal(want)
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	if raw[0] != '[' {
+		t.Errorf("encoded as %s, want a two element pair", raw)
+	}
+
+	var got Input
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got.OutPoint != want.OutPoint || string(got.LeafHash) != string(want.LeafHash) {
+		t.Errorf("round trip = %+v, want %+v", got, want)
+	}
+}

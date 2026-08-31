@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 
 	"github.com/jackc/pgx/v5"
 
@@ -108,7 +109,7 @@ func (s *Store) Deposits(
 	if len(mainchainTxid) > 0 {
 		key = mainchainTxid
 	}
-	rows, err := s.pool.Query(ctx, query, key, int32(startHeight), limit)
+	rows, err := s.pool.Query(ctx, query, key, clampHeight(startHeight), limit)
 	if err != nil {
 		return nil, fmt.Errorf("read deposits: %w", err)
 	}
@@ -184,7 +185,7 @@ func (s *Store) History(
 		ORDER BY height DESC, id
 		LIMIT $3`, column)
 
-	rows, err := s.pool.Query(ctx, query, key, int32(beforeHeight), limit)
+	rows, err := s.pool.Query(ctx, query, key, clampHeight(beforeHeight), limit)
 	if err != nil {
 		return nil, fmt.Errorf("read %s history: %w", column, err)
 	}
@@ -208,6 +209,16 @@ func (s *Store) History(
 		return nil, fmt.Errorf("read history rows: %w", err)
 	}
 	return out, nil
+}
+
+// clampHeight keeps a height inside the range the height column holds. A
+// caller that means "no upper bound" passes the largest uint32, and a plain
+// cast would turn that into -1 and match nothing.
+func clampHeight(height uint32) int32 {
+	if height > math.MaxInt32 {
+		return math.MaxInt32
+	}
+	return int32(height)
 }
 
 // checkKeyColumn guards the one place this package builds SQL by hand. Only

@@ -40,6 +40,10 @@ func (i *Input) UnmarshalJSON(data []byte) error {
 	return json.Unmarshal(pair[1], &i.LeafHash)
 }
 
+func (i Input) MarshalJSON() ([]byte, error) {
+	return json.Marshal([]any{i.OutPoint, i.LeafHash})
+}
+
 // Authorization is the ed25519 signature over one input.
 type Authorization struct {
 	VerifyingKey Bytes `json:"verifying_key"`
@@ -109,6 +113,8 @@ type Decoder interface {
 type TxInfo struct {
 	Txid Hash   `json:"txid"`
 	Size uint64 `json:"size"`
+	// Raw is the borsh encoding. It is what /tx/{txid}/hex serves.
+	Raw Bytes `json:"raw"`
 }
 
 // BlockIndex carries everything a block body does not. A transaction has no

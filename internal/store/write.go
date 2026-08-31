@@ -28,6 +28,9 @@ type Spend struct {
 	// Source is the spending txid, or the bundle m6id for a peg-out.
 	Source chain.Hash
 	Kind   chain.InPointKind
+	// Vin is the input position. A bundle spend has no transaction, so it
+	// carries the position within the bundle instead.
+	Vin uint32
 }
 
 // Tx is one transaction row.
@@ -36,6 +39,7 @@ type Tx struct {
 	Index     int
 	SizeBytes int
 	FeeSats   int64
+	Raw       []byte
 }
 
 // Block is everything one block writes. The index package builds it; this
@@ -112,11 +116,11 @@ func insertTxs(ctx context.Context, tx pgx.Tx, b Block) error {
 	}
 	rows := make([][]any, len(b.Txs))
 	for i, t := range b.Txs {
-		rows[i] = []any{t.Txid[:], int32(b.Height), int32(t.Index), int32(t.SizeBytes), t.FeeSats}
+		rows[i] = []any{t.Txid[:], int32(b.Height), int32(t.Index), int32(t.SizeBytes), t.FeeSats, t.Raw}
 	}
 	_, err := tx.CopyFrom(ctx,
 		pgx.Identifier{"txs"},
-		[]string{"txid", "height", "tx_index", "size_bytes", "fee_sats"},
+		[]string{"txid", "height", "tx_index", "size_bytes", "fee_sats", "raw"},
 		pgx.CopyFromRows(rows))
 	if err != nil {
 		return fmt.Errorf("insert transactions for block %d: %w", b.Height, err)
@@ -161,20 +165,24 @@ func applySpends(ctx context.Context, tx pgx.Tx, b Block) (int, error) {
 	keys := make([][]byte, len(b.Spends))
 	sources := make([][]byte, len(b.Spends))
 	kinds := make([]int16, len(b.Spends))
+	vins := make([]int32, len(b.Spends))
 	for i, sp := range b.Spends {
 		key := sp.OutPoint.Key()
 		keys[i] = key[:]
 		source := sp.Source
 		sources[i] = source[:]
 		kinds[i] = int16(sp.Kind)
+		vins[i] = int32(sp.Vin)
 	}
 
 	tag, err := tx.Exec(ctx,
 		`UPDATE outputs AS o
-		 SET spent_source = s.source, spent_kind = s.kind, spent_height = $4
-		 FROM unnest($1::bytea[], $2::bytea[], $3::smallint[]) AS s(outpoint, source, kind)
+		 SET spent_source = s.source, spent_kind = s.kind, spent_vin = s.vin,
+		     spent_height = $5
+		 FROM unnest($1::bytea[], $2::bytea[], $3::smallint[], $4::integer[])
+		      AS s(outpoint, source, kind, vin)
 		 WHERE o.outpoint = s.outpoint`,
-		keys, sources, kinds, int32(b.Height))
+		keys, sources, kinds, vins, int32(b.Height))
 	if err != nil {
 		return 0, fmt.Errorf("mark spends for block %d: %w", b.Height, err)
 	}
@@ -218,7 +226,8 @@ func setTip(ctx context.Context, tx pgx.Tx, height uint32, hash chain.Hash) erro
 func (s *Store) Rollback(ctx context.Context, height uint32) error {
 	return s.inTx(ctx, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx,
-			`UPDATE outputs SET spent_source = NULL, spent_kind = NULL, spent_height = NULL
+			`UPDATE outputs SET spent_source = NULL, spent_kind = NULL,
+			        spent_vin = NULL, spent_height = NULL
 			 WHERE spent_height > $1`, int32(height)); err != nil {
 			return fmt.Errorf("unspend outputs above height %d: %w", height, err)
 		}

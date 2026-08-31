@@ -13,7 +13,8 @@ CREATE TABLE txs (
     height     INTEGER NOT NULL REFERENCES blocks(height) ON DELETE CASCADE,
     tx_index   INTEGER NOT NULL,
     size_bytes INTEGER NOT NULL,
-    fee_sats   BIGINT  NOT NULL
+    fee_sats   BIGINT  NOT NULL,
+    raw        BYTEA   NOT NULL
 );
 
 CREATE INDEX txs_height_idx ON txs (height DESC, tx_index);
@@ -35,6 +36,7 @@ CREATE TABLE outputs (
     height_exact BOOLEAN  NOT NULL DEFAULT TRUE,
     spent_source BYTEA,
     spent_kind   SMALLINT,
+    spent_vin    INTEGER,
     spent_height INTEGER
 );
 
