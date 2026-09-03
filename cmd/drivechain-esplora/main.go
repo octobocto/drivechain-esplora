@@ -87,15 +87,18 @@ func run() error {
 
 	// Neither the node nor the database has to be up at start. Each one sits
 	// behind a wrapper that keeps trying.
-	nodes := service.New("node", log,
-		func(ctx context.Context) (*chain.Node, error) {
-			node := chain.NewNode(rpc.New(nodeURL))
-			if _, err := node.TipHeight(ctx); err != nil &&
-				!errors.Is(err, chain.ErrEmptyChain) {
-				return nil, err
-			}
-			return node, nil
-		}, nil)
+	connect := func(ctx context.Context) (*chain.Node, error) {
+		node := chain.NewNode(rpc.New(nodeURL))
+		if _, err := node.TipHeight(ctx); err != nil &&
+			!errors.Is(err, chain.ErrEmptyChain) {
+			return nil, err
+		}
+		return node, nil
+	}
+	nodes := service.New("node", log, connect, nil)
+	// The mempool poller holds its own connection, so a slow block read never
+	// delays an unconfirmed payment.
+	mempoolNodes := service.New("mempool node", log, connect, nil)
 
 	stores := service.New("database", log,
 		func(ctx context.Context) (*store.Store, error) {
@@ -112,12 +115,20 @@ func run() error {
 		func(st *store.Store) { st.Close() })
 
 	go nodes.Run(ctx)
+	go mempoolNodes.Run(ctx)
 	go stores.Run(ctx)
 
 	syncer := index.NewSyncer(nodes, stores, decoder, nil, log)
 	go func() {
 		if err := syncer.Run(ctx); err != nil && ctx.Err() == nil {
 			log.Error("sync stopped", "error", err)
+		}
+	}()
+
+	mempool := index.NewMempoolSyncer(mempoolNodes, stores, decoder, log)
+	go func() {
+		if err := mempool.Run(ctx); err != nil && ctx.Err() == nil {
+			log.Error("mempool sync stopped", "error", err)
 		}
 	}()
 

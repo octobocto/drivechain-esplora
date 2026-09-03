@@ -65,29 +65,12 @@ func Prepare(
 			Raw:       info.Raw,
 		})
 
-		for vin, input := range tx.Inputs {
-			out.Spends = append(out.Spends, store.Spend{
-				OutPoint: input.OutPoint,
-				Source:   info.Txid,
-				Kind:     chain.SpendRegular,
-				Vin:      uint32(vin),
-			})
+		rows, err := prepareTx(info.Txid, tx, decoder)
+		if err != nil {
+			return store.Block{}, fmt.Errorf("block %s: %w", hash, err)
 		}
-
-		for j, output := range tx.Outputs {
-			row, err := newOutput(
-				chain.OutPoint{
-					Kind:   chain.KindRegular,
-					Source: info.Txid,
-					Vout:   uint32(j),
-				},
-				output, decoder, true)
-			if err != nil {
-				return store.Block{}, fmt.Errorf(
-					"block %s transaction %s output %d: %w", hash, info.Txid, j, err)
-			}
-			out.Creates = append(out.Creates, row)
-		}
+		out.Spends = append(out.Spends, rows.Spends...)
+		out.Creates = append(out.Creates, rows.Creates...)
 	}
 
 	for _, deposit := range blockIndex.Deposits {
@@ -133,4 +116,63 @@ func newOutput(
 		ContentType: content.Type,
 		HeightExact: heightExact,
 	}, nil
+}
+
+// txRows is what one transaction adds to an index write. A mined block and the
+// mempool hold the same rule, so both callers read it here.
+type txRows struct {
+	Spends  []store.Spend
+	Creates []store.Output
+}
+
+// prepareTx turns one transaction into the rows it writes.
+func prepareTx(txid chain.Hash, tx chain.Transaction, decoder chain.Decoder) (txRows, error) {
+	var out txRows
+	for vin, input := range tx.Inputs {
+		out.Spends = append(out.Spends, store.Spend{
+			OutPoint: input.OutPoint,
+			Source:   txid,
+			Kind:     chain.SpendRegular,
+			Vin:      uint32(vin),
+		})
+	}
+	for i, output := range tx.Outputs {
+		row, err := newOutput(
+			chain.OutPoint{Kind: chain.KindRegular, Source: txid, Vout: uint32(i)},
+			output, decoder, true)
+		if err != nil {
+			return txRows{}, fmt.Errorf("transaction %s output %d: %w", txid, i, err)
+		}
+		out.Creates = append(out.Creates, row)
+	}
+	return out, nil
+}
+
+// PrepareMempool turns the transactions of a block template into the whole
+// unconfirmed set. A pass replaces that set, so a transaction the node dropped
+// leaves the index with it.
+//
+// A template names no txid and no size, so the chain identifies each
+// transaction from its own encoding.
+func PrepareMempool(txs []chain.Transaction, decoder chain.Decoder) (store.Mempool, error) {
+	var out store.Mempool
+	for i, tx := range txs {
+		info, err := decoder.IdentifyTx(tx)
+		if err != nil {
+			return store.Mempool{}, fmt.Errorf("identify mempool transaction %d: %w", i, err)
+		}
+		rows, err := prepareTx(info.Txid, tx, decoder)
+		if err != nil {
+			return store.Mempool{}, err
+		}
+		out.Txs = append(out.Txs, store.MempoolTx{
+			Txid:      info.Txid,
+			Index:     i,
+			SizeBytes: int(info.Size),
+			Raw:       info.Raw,
+		})
+		out.Spends = append(out.Spends, rows.Spends...)
+		out.Creates = append(out.Creates, rows.Creates...)
+	}
+	return out, nil
 }
