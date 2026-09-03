@@ -87,6 +87,9 @@ func (s *Store) Apply(ctx context.Context, block Block) (ApplyResult, error) {
 		if err := setFees(ctx, tx, block.Height); err != nil {
 			return err
 		}
+		if err := clearMempool(ctx, tx, block); err != nil {
+			return err
+		}
 		return setTip(ctx, tx, block.Height, block.Hash)
 	})
 	if err != nil {
@@ -207,6 +210,44 @@ func setFees(ctx context.Context, tx pgx.Tx, height uint32) error {
 		 WHERE t.height = $1`, int32(height))
 	if err != nil {
 		return fmt.Errorf("compute fees for block %d: %w", height, err)
+	}
+	return nil
+}
+
+// clearMempool drops the snapshot rows this block confirms. A coin that sits in
+// both tables counts twice, so the block that carries it takes it out of the
+// unconfirmed set at the same time.
+func clearMempool(ctx context.Context, tx pgx.Tx, b Block) error {
+	txids := make([][]byte, 0, len(b.Txs))
+	for _, t := range b.Txs {
+		txid := t.Txid
+		txids = append(txids, txid[:])
+	}
+	creates := make([][]byte, 0, len(b.Creates))
+	for _, o := range b.Creates {
+		key := o.OutPoint.Key()
+		creates = append(creates, key[:])
+	}
+	spends := make([][]byte, 0, len(b.Spends))
+	for _, sp := range b.Spends {
+		key := sp.OutPoint.Key()
+		spends = append(spends, key[:])
+	}
+
+	for _, clear := range []struct {
+		query string
+		keys  [][]byte
+	}{
+		{`DELETE FROM mempool_txs WHERE txid = ANY($1::bytea[])`, txids},
+		{`DELETE FROM mempool_outputs WHERE outpoint = ANY($1::bytea[])`, creates},
+		{`DELETE FROM mempool_spends WHERE outpoint = ANY($1::bytea[])`, spends},
+	} {
+		if len(clear.keys) == 0 {
+			continue
+		}
+		if _, err := tx.Exec(ctx, clear.query, clear.keys); err != nil {
+			return fmt.Errorf("clear the mempool for block %d: %w", b.Height, err)
+		}
 	}
 	return nil
 }

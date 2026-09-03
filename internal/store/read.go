@@ -30,6 +30,9 @@ type UTXO struct {
 	ContentType string
 	Content     json.RawMessage
 	HeightExact bool
+	// Unconfirmed marks an output the mempool holds. No block carries it, so
+	// its height and its block hash are empty.
+	Unconfirmed bool
 }
 
 // TxRef names one transaction in an address history.
