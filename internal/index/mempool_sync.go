@@ -12,11 +12,6 @@ import (
 	"github.com/octobocto/drivechain-esplora/internal/store"
 )
 
-// MempoolInterval is how long the poller waits between passes. One read of the
-// node costs about a millisecond, so a payment reaches a wallet in about the
-// time the wallet takes to ask for it.
-const MempoolInterval = 250 * time.Millisecond
-
 // MempoolSyncer keeps the unconfirmed set level with the node.
 //
 // The node names the transactions it would mine next, which is its mempool. A
@@ -45,7 +40,7 @@ func NewMempoolSyncer(
 		stores:   stores,
 		decoder:  decoder,
 		log:      log,
-		Interval: MempoolInterval,
+		Interval: PollInterval,
 	}
 }
 

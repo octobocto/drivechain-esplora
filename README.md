@@ -80,7 +80,8 @@ for that time.
 
 So the index holds the unconfirmed set too. It reads `get_block_template` four
 times a second, which is the block the node would mine next, and that body is
-the node's mempool. A pass replaces the whole snapshot, so a transaction the
+the node's mempool. It reads the chain itself four times a second as well, so a
+coin becomes spendable within a second of the block that carries it. A pass replaces the whole snapshot, so a transaction the
 node dropped leaves the index with it.
 
 The snapshot reaches every route a wallet reads:

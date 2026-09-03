@@ -12,6 +12,11 @@ import (
 	"github.com/octobocto/drivechain-esplora/internal/store"
 )
 
+// PollInterval is how long a syncer waits between passes. One read of the node
+// costs about a millisecond, so a wallet sees a payment, and the block that
+// carries it, in about the time the wallet takes to ask.
+const PollInterval = 250 * time.Millisecond
+
 // TimeSource reads the mainchain block time a sidechain header points at. A
 // sidechain header carries no timestamp of its own.
 type TimeSource interface {
@@ -32,7 +37,8 @@ type Syncer struct {
 	node  *chain.Node
 	store *store.Store
 
-	// Interval is how long the syncer waits after it reaches the tip.
+	// Interval is how long the syncer waits after it reaches the tip. A coin
+	// becomes spendable at its block, so this bounds how long a wallet waits.
 	Interval time.Duration
 }
 
@@ -50,7 +56,7 @@ func NewSyncer(
 		decoder:  decoder,
 		times:    times,
 		log:      log,
-		Interval: 2 * time.Second,
+		Interval: PollInterval,
 	}
 }
 
