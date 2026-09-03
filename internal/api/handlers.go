@@ -192,11 +192,23 @@ func (s *Server) tx(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	row, err := st.Tx(r.Context(), txid)
+	row, err := s.txRow(r, st, txid)
 	if s.notFound(w, r, err) {
 		return
 	}
 	writeJSON(w, newTx(row))
+}
+
+// txRow reads one transaction, mined or not. An unconfirmed transaction lives
+// in the snapshot alone, and it reads back with no block.
+func (s *Server) txRow(
+	r *http.Request, st *store.Store, txid chain.Hash,
+) (store.TxRow, error) {
+	row, err := st.Tx(r.Context(), txid)
+	if errors.Is(err, store.ErrNotFound) {
+		return st.MempoolTxRow(r.Context(), txid)
+	}
+	return row, err
 }
 
 func (s *Server) txStatus(w http.ResponseWriter, r *http.Request) {
@@ -204,11 +216,11 @@ func (s *Server) txStatus(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	row, err := st.Tx(r.Context(), txid)
+	row, err := s.txRow(r, st, txid)
 	if s.notFound(w, r, err) {
 		return
 	}
-	writeJSON(w, newStatus(row.Height, row.Block.Hash, row.Block.BlockTime))
+	writeJSON(w, txStatus(row))
 }
 
 func (s *Server) txHex(w http.ResponseWriter, r *http.Request) {
@@ -216,7 +228,7 @@ func (s *Server) txHex(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	row, err := st.Tx(r.Context(), txid)
+	row, err := s.txRow(r, st, txid)
 	if s.notFound(w, r, err) {
 		return
 	}
@@ -331,16 +343,63 @@ func (s *Server) feeEstimates(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) mempool(w http.ResponseWriter, r *http.Request) {
+	st, ok := s.store(w, r)
+	if !ok {
+		return
+	}
+	count, vsize, fees, err := st.MempoolSummary(r.Context())
+	if s.failed(w, r, err) {
+		return
+	}
 	writeJSON(w, map[string]any{
-		"count":         0,
-		"vsize":         0,
-		"total_fee":     0,
+		"count":     count,
+		"vsize":     vsize,
+		"total_fee": fees,
+		// These chains have no fee market, so every transaction pays the same
+		// rate and one bucket says nothing a caller can use.
 		"fee_histogram": []any{},
 	})
 }
 
-func (s *Server) emptyList(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, []any{})
+func (s *Server) mempoolTxids(w http.ResponseWriter, r *http.Request) {
+	st, ok := s.store(w, r)
+	if !ok {
+		return
+	}
+	txids, err := st.MempoolTxids(r.Context())
+	if s.failed(w, r, err) {
+		return
+	}
+	writeJSON(w, hashStrings(txids))
+}
+
+// RecentTx is one row of /mempool/recent.
+type RecentTx struct {
+	Txid  string `json:"txid"`
+	Fee   int64  `json:"fee"`
+	Vsize int    `json:"vsize"`
+	Value int64  `json:"value"`
+}
+
+func (s *Server) mempoolRecent(w http.ResponseWriter, r *http.Request) {
+	st, ok := s.store(w, r)
+	if !ok {
+		return
+	}
+	rows, err := st.MempoolRecent(r.Context(), recentListSize)
+	if s.failed(w, r, err) {
+		return
+	}
+	out := make([]RecentTx, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, RecentTx{
+			Txid:  row.Txid.String(),
+			Fee:   row.FeeSats,
+			Vsize: row.SizeBytes,
+			Value: row.ValueSats,
+		})
+	}
+	writeJSON(w, out)
 }
 
 func (s *Server) health(w http.ResponseWriter, r *http.Request) {

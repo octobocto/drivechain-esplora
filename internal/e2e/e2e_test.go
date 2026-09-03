@@ -48,10 +48,11 @@ func value(sats uint64) json.RawMessage {
 }
 
 type harness struct {
-	node   *e2e.FakeNode
-	store  *store.Store
-	syncer *index.Syncer
-	api    *httptest.Server
+	node    *e2e.FakeNode
+	store   *store.Store
+	syncer  *index.Syncer
+	mempool *index.MempoolSyncer
+	api     *httptest.Server
 }
 
 func newHarness(t *testing.T) *harness {
@@ -100,10 +101,11 @@ func newHarness(t *testing.T) *harness {
 	t.Cleanup(server.Close)
 
 	return &harness{
-		node:   node,
-		store:  st,
-		syncer: index.NewSyncer(nodes, stores, thunder.Decoder{}, nil, quiet()),
-		api:    server,
+		node:    node,
+		store:   st,
+		syncer:  index.NewSyncer(nodes, stores, thunder.Decoder{}, nil, quiet()),
+		mempool: index.NewMempoolSyncer(nodes, stores, thunder.Decoder{}, quiet()),
+		api:     server,
 	}
 }
 
@@ -135,6 +137,13 @@ func (h *harness) sync(t *testing.T) {
 	t.Helper()
 	if err := h.syncer.Once(context.Background()); err != nil {
 		t.Fatalf("sync: %v", err)
+	}
+}
+
+func (h *harness) syncMempool(t *testing.T) {
+	t.Helper()
+	if err := h.mempool.Once(context.Background()); err != nil {
+		t.Fatalf("mempool sync: %v", err)
 	}
 }
 
@@ -440,5 +449,217 @@ func TestBroadcastRefusesANonJSONBody(t *testing.T) {
 	}
 	if len(h.node.Submitted()) != 0 {
 		t.Error("a bad body reached the node")
+	}
+}
+
+// A payment must reach a wallet before a block carries it. The node holds the
+// transaction, the poller reads it, and every address route shows it at once.
+func TestUnconfirmedPaymentReachesTheAPI(t *testing.T) {
+	h := newHarness(t)
+
+	alice, bob := addr(1), addr(2)
+	genesisHash, merkle := hash(0xa0), hash(0x80)
+	coin := chain.OutPoint{Kind: chain.KindCoinbase, Source: merkle, Vout: 0}
+
+	h.node.AddBlock(genesisHash, &chain.Block{
+		Header: chain.Header{MerkleRoot: merkle, PrevMainHash: chain.BitcoinHash(hash(0x40))},
+		Body:   chain.Body{Coinbase: []chain.Output{{Address: alice, Content: value(50000)}}},
+	}, chain.BlockIndex{})
+	h.sync(t)
+
+	// Alice pays bob 40000 and keeps 9000. The 1000 that is left is the fee.
+	tx := chain.Transaction{
+		Inputs: []chain.Input{{OutPoint: coin, LeafHash: make(chain.Bytes, 32)}},
+		Outputs: []chain.Output{
+			{Address: bob, Content: value(40000)},
+			{Address: alice, Content: value(9000)},
+		},
+	}
+	info, err := thunder.Decoder{}.IdentifyTx(tx)
+	if err != nil {
+		t.Fatalf("identify: %v", err)
+	}
+	txid := info.Txid.String()
+
+	h.node.SetMempool([]chain.Transaction{tx})
+	h.syncMempool(t)
+
+	// Bob sees the payment, and it counts as unconfirmed.
+	var bobInfo api.AddressInfo
+	if status := h.get(t, "/address/"+bob.String(), &bobInfo); status != 200 {
+		t.Fatalf("bob address status = %d", status)
+	}
+	if bobInfo.MempoolStats.FundedTxoSum != 40000 || bobInfo.MempoolStats.TxCount != 1 {
+		t.Errorf("bob mempool stats = %+v, want 40000 over one transaction",
+			bobInfo.MempoolStats)
+	}
+	if bobInfo.ChainStats.FundedTxoSum != 0 {
+		t.Errorf("bob chain stats = %+v, want nothing mined", bobInfo.ChainStats)
+	}
+
+	var bobUTXOs []api.UTXO
+	h.get(t, "/address/"+bob.String()+"/utxo", &bobUTXOs)
+	if len(bobUTXOs) != 1 || bobUTXOs[0].Value != 40000 {
+		t.Fatalf("bob utxos = %+v, want one worth 40000", bobUTXOs)
+	}
+	if bobUTXOs[0].Status.Confirmed {
+		t.Error("bob's new coin reads as confirmed")
+	}
+	if bobUTXOs[0].Txid != txid {
+		t.Errorf("bob utxo txid = %s, want %s", bobUTXOs[0].Txid, txid)
+	}
+
+	// Alice loses the coin she spent at once, and holds her change instead.
+	var aliceUTXOs []api.UTXO
+	h.get(t, "/address/"+alice.String()+"/utxo", &aliceUTXOs)
+	if len(aliceUTXOs) != 1 || aliceUTXOs[0].Value != 9000 {
+		t.Fatalf("alice utxos = %+v, want her 9000 change alone", aliceUTXOs)
+	}
+	if aliceUTXOs[0].Status.Confirmed {
+		t.Error("alice's change reads as confirmed")
+	}
+
+	var aliceInfo api.AddressInfo
+	h.get(t, "/address/"+alice.String(), &aliceInfo)
+	if aliceInfo.MempoolStats.SpentTxoSum != 50000 {
+		t.Errorf("alice mempool spent = %d, want 50000", aliceInfo.MempoolStats.SpentTxoSum)
+	}
+
+	// The history carries the unconfirmed row first, the way an Esplora client
+	// reads it.
+	var history []api.Tx
+	h.get(t, "/address/"+bob.String()+"/txs", &history)
+	if len(history) != 1 || history[0].Txid != txid {
+		t.Fatalf("bob history = %+v, want the unconfirmed payment", history)
+	}
+	if history[0].Status.Confirmed {
+		t.Error("the history row reads as confirmed")
+	}
+	if history[0].Fee != 1000 {
+		t.Errorf("fee = %d, want 1000", history[0].Fee)
+	}
+	if len(history[0].Vin) != 1 || history[0].Vin[0].Prevout.Value != 50000 {
+		t.Errorf("vin = %+v, want the coin alice spent", history[0].Vin)
+	}
+
+	var pending []api.Tx
+	h.get(t, "/address/"+bob.String()+"/txs/mempool", &pending)
+	if len(pending) != 1 || pending[0].Txid != txid {
+		t.Errorf("bob mempool history = %+v, want the payment", pending)
+	}
+
+	// A transaction read finds it, and reports that no block carries it.
+	var one api.Tx
+	if status := h.get(t, "/tx/"+txid, &one); status != 200 {
+		t.Fatalf("tx status = %d", status)
+	}
+	if one.Status.Confirmed || one.Size != int(info.Size) {
+		t.Errorf("tx = %+v, want an unconfirmed row of size %d", one, info.Size)
+	}
+	var txStatus api.Status
+	h.get(t, "/tx/"+txid+"/status", &txStatus)
+	if txStatus.Confirmed {
+		t.Error("the status route reads as confirmed")
+	}
+	if raw, status := h.text(t, "/tx/"+txid+"/hex"); status != 200 || raw == "" {
+		t.Errorf("hex = %q (status %d), want the encoding", raw, status)
+	}
+
+	// The mempool routes count the same transaction.
+	var summary struct {
+		Count    int   `json:"count"`
+		Vsize    int64 `json:"vsize"`
+		TotalFee int64 `json:"total_fee"`
+	}
+	h.get(t, "/mempool", &summary)
+	if summary.Count != 1 || summary.TotalFee != 1000 {
+		t.Errorf("summary = %+v, want one transaction paying 1000", summary)
+	}
+	var txids []string
+	h.get(t, "/mempool/txids", &txids)
+	if len(txids) != 1 || txids[0] != txid {
+		t.Errorf("mempool txids = %v, want the payment", txids)
+	}
+	var recent []api.RecentTx
+	h.get(t, "/mempool/recent", &recent)
+	if len(recent) != 1 || recent[0].Value != 49000 {
+		t.Errorf("recent = %+v, want one row paying out 49000", recent)
+	}
+}
+
+// A block that carries the payment must not add it a second time. The balance
+// stays the same and only the status changes.
+func TestABlockTakesOverTheUnconfirmedPayment(t *testing.T) {
+	h := newHarness(t)
+
+	alice, bob := addr(1), addr(2)
+	genesisHash, merkle0 := hash(0xa0), hash(0x80)
+	coin := chain.OutPoint{Kind: chain.KindCoinbase, Source: merkle0, Vout: 0}
+
+	h.node.AddBlock(genesisHash, &chain.Block{
+		Header: chain.Header{MerkleRoot: merkle0, PrevMainHash: chain.BitcoinHash(hash(0x40))},
+		Body:   chain.Body{Coinbase: []chain.Output{{Address: alice, Content: value(50000)}}},
+	}, chain.BlockIndex{})
+	h.sync(t)
+
+	tx := chain.Transaction{
+		Inputs:  []chain.Input{{OutPoint: coin, LeafHash: make(chain.Bytes, 32)}},
+		Outputs: []chain.Output{{Address: bob, Content: value(49000)}},
+	}
+	info, err := thunder.Decoder{}.IdentifyTx(tx)
+	if err != nil {
+		t.Fatalf("identify: %v", err)
+	}
+
+	h.node.SetMempool([]chain.Transaction{tx})
+	h.syncMempool(t)
+
+	// The same transaction now arrives in a block, before the poller runs
+	// again. Both tables would hold the coin, and bob would read it twice.
+	prev := genesisHash
+	h.node.AddBlock(hash(0xa1), &chain.Block{
+		Header: chain.Header{
+			MerkleRoot: hash(0x81), PrevSideHash: &prev,
+			PrevMainHash: chain.BitcoinHash(hash(0x41)),
+		},
+		Body: chain.Body{Transactions: []chain.Transaction{tx}},
+	}, chain.BlockIndex{
+		Txs: []chain.TxInfo{{Txid: info.Txid, Size: info.Size, Raw: info.Raw}},
+	})
+	h.sync(t)
+
+	var utxos []api.UTXO
+	h.get(t, "/address/"+bob.String()+"/utxo", &utxos)
+	if len(utxos) != 1 || utxos[0].Value != 49000 {
+		t.Fatalf("bob utxos = %+v, want the one coin", utxos)
+	}
+	if !utxos[0].Status.Confirmed {
+		t.Error("the coin still reads as unconfirmed after its block")
+	}
+
+	var info2 api.AddressInfo
+	h.get(t, "/address/"+bob.String(), &info2)
+	if info2.ChainStats.FundedTxoSum != 49000 {
+		t.Errorf("bob chain stats = %+v, want 49000", info2.ChainStats)
+	}
+	if info2.MempoolStats.FundedTxoCount != 0 {
+		t.Errorf("bob mempool stats = %+v, want nothing left", info2.MempoolStats)
+	}
+
+	var history []api.Tx
+	h.get(t, "/address/"+bob.String()+"/txs", &history)
+	if len(history) != 1 {
+		t.Fatalf("bob history holds %d rows, want the payment one time", len(history))
+	}
+
+	// The poller runs again and finds the node holds nothing.
+	h.node.SetMempool(nil)
+	h.syncMempool(t)
+	var summary struct {
+		Count int `json:"count"`
+	}
+	h.get(t, "/mempool", &summary)
+	if summary.Count != 0 {
+		t.Errorf("the mempool still holds %d transactions", summary.Count)
 	}
 }

@@ -36,6 +36,9 @@ type TxRow struct {
 	Block     BlockRow
 	Vin       []Coin
 	Vout      []Coin
+	// Unconfirmed marks a row the mempool holds. No block carries it, so its
+	// height and its block are empty.
+	Unconfirmed bool
 }
 
 // Coin is one output, seen either as a transaction input or as its output.

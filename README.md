@@ -68,8 +68,35 @@ GET  /address/{a}              GET /address/{a}/utxo
 GET  /address/{a}/txs          GET /address/{a}/txs/chain[/{last_seen}]
 GET  /address/{a}/txs/mempool
 GET  /scripthash/{h}           and the same four scripthash routes
-GET  /fee-estimates
+GET  /mempool                  GET /mempool/txids
+GET  /mempool/recent           GET /fee-estimates
 ```
+
+### Unconfirmed coins
+
+A wallet must see a payment before a block carries it. On thunder a block takes
+minutes, so an index that serves mined blocks alone shows a user nothing at all
+for that time.
+
+So the index holds the unconfirmed set too. It reads `get_block_template` four
+times a second, which is the block the node would mine next, and that body is
+the node's mempool. A pass replaces the whole snapshot, so a transaction the
+node dropped leaves the index with it.
+
+The snapshot reaches every route a wallet reads:
+
+- `/address/{a}` fills `mempool_stats`.
+- `/address/{a}/utxo` adds the unconfirmed coins, and drops a confirmed coin
+  the mempool spends. A spend leaves the balance at once.
+- `/address/{a}/txs` carries the unconfirmed rows first, and
+  `/address/{a}/txs/mempool` carries them alone.
+- `/tx/{txid}` finds an unconfirmed transaction and answers
+  `"confirmed": false`.
+- `/mempool`, `/mempool/txids` and `/mempool/recent` count the whole set.
+
+A block template names no txid and no size, so the index computes both from the
+transaction itself: a blake3 digest over the borsh encoding, which is what the
+node does.
 
 ### Drivechain
 
@@ -138,8 +165,9 @@ Each difference comes from the chain, not from a shortcut.
 
 ## What the node must serve
 
-This service reads three methods every rust sidechain already has:
-`get_best_sidechain_block_hash`, `getblockcount`, and `get_block`.
+This service reads four methods every rust sidechain already has:
+`get_best_sidechain_block_hash`, `getblockcount`, `get_block`, and
+`get_block_template`.
 
 It reads two more that are new:
 
@@ -155,6 +183,10 @@ An index built from block bodies alone misses both.
 
 A node that adds the deposit index resyncs one time to record historic deposits.
 Every deposit after that is exact.
+
+`get_block_template` needs a mainchain connection, because the header it builds
+names the mainchain tip. A node with no enforcer behind it serves every mined
+block and no unconfirmed set.
 
 ## Licence
 

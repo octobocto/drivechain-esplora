@@ -35,8 +35,8 @@ type AddressInfo struct {
 	Address    string   `json:"address,omitempty"`
 	ScriptHash string   `json:"scripthash,omitempty"`
 	ChainStats TxoStats `json:"chain_stats"`
-	// MempoolStats stays at zero. These nodes serve no mempool view, and a
-	// client reads the field on every balance.
+	// MempoolStats counts what the unconfirmed set funds and spends, so a
+	// wallet sees a payment before a block carries it.
 	MempoolStats TxoStats `json:"mempool_stats"`
 }
 
@@ -145,6 +145,10 @@ func newStatus(height uint32, hash chain.Hash, blockTime *int64) Status {
 	return Status{Confirmed: true, BlockHeight: &h, BlockHash: &s, BlockTime: blockTime}
 }
 
+// pendingStatus is what a row the mempool holds reads. No block carries it, so
+// it names no height, no hash and no time.
+var pendingStatus = Status{Confirmed: false}
+
 // sourceString renders an outpoint source. A deposit names a mainchain txid, so
 // it keeps mainchain byte order. Everything else keeps the chain's own order.
 func sourceString(o chain.OutPoint) string {
@@ -175,7 +179,7 @@ func newTx(row store.TxRow) Tx {
 		Fee:    row.FeeSats,
 		Vin:    make([]Vin, 0, len(row.Vin)),
 		Vout:   make([]Vout, 0, len(row.Vout)),
-		Status: newStatus(row.Height, row.Block.Hash, row.Block.BlockTime),
+		Status: txStatus(row),
 	}
 	for _, coin := range row.Vin {
 		prevout := newVout(coin)
@@ -196,12 +200,24 @@ func newTx(row store.TxRow) Tx {
 	return out
 }
 
+// txStatus is where one transaction sits.
+func txStatus(row store.TxRow) Status {
+	if row.Unconfirmed {
+		return pendingStatus
+	}
+	return newStatus(row.Height, row.Block.Hash, row.Block.BlockTime)
+}
+
 func newUTXO(u store.UTXO) UTXO {
+	status := pendingStatus
+	if !u.Unconfirmed {
+		status = newStatus(u.Height, u.BlockHash, u.BlockTime)
+	}
 	return UTXO{
 		Txid:         sourceString(u.OutPoint),
 		Vout:         u.OutPoint.Vout,
 		Value:        u.ValueSats,
-		Status:       newStatus(u.Height, u.BlockHash, u.BlockTime),
+		Status:       status,
 		OutpointKind: u.OutPoint.Kind.String(),
 		HeightExact:  u.HeightExact,
 		ContentType:  u.ContentType,

@@ -19,6 +19,9 @@ const PageSize = 25
 // blockListSize is how many headers /blocks returns.
 const blockListSize = 10
 
+// recentListSize is how many rows /mempool/recent returns.
+const recentListSize = 10
+
 // FeeRateSatPerVByte is what /fee-estimates answers for every target. These
 // chains have no fee market, and a client calls this before every send.
 const FeeRateSatPerVByte = 1.0
@@ -86,7 +89,7 @@ func (s *Server) Handler() http.Handler {
 		mux.HandleFunc("GET /"+prefix+"/{key}/txs", s.addressTxs)
 		mux.HandleFunc("GET /"+prefix+"/{key}/txs/chain", s.addressTxs)
 		mux.HandleFunc("GET /"+prefix+"/{key}/txs/chain/{last_seen}", s.addressTxs)
-		mux.HandleFunc("GET /"+prefix+"/{key}/txs/mempool", s.emptyList)
+		mux.HandleFunc("GET /"+prefix+"/{key}/txs/mempool", s.addressMempoolTxs)
 	}
 	mux.HandleFunc("GET /address/{key}/deposits", s.addressDeposits)
 
@@ -95,8 +98,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /deposits/{start_height}", s.deposits)
 
 	mux.HandleFunc("GET /mempool", s.mempool)
-	mux.HandleFunc("GET /mempool/txids", s.emptyList)
-	mux.HandleFunc("GET /mempool/recent", s.emptyList)
+	mux.HandleFunc("GET /mempool/txids", s.mempoolTxids)
+	mux.HandleFunc("GET /mempool/recent", s.mempoolRecent)
 	mux.HandleFunc("GET /fee-estimates", s.feeEstimates)
 
 	// A sidechain lives inside the mainchain's hashrate escrow. These read that
