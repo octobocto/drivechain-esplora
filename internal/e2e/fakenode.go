@@ -22,6 +22,8 @@ type FakeNode struct {
 	// submitted holds every transaction a broadcast handed over, so a test
 	// reads what reached the node.
 	submitted []json.RawMessage
+	// mempool holds the transactions the node would mine next.
+	mempool []chain.Transaction
 
 	server *httptest.Server
 }
@@ -56,6 +58,14 @@ func (n *FakeNode) AddBlock(hash chain.Hash, block *chain.Block, index chain.Blo
 	n.chainT = append(n.chainT, hash)
 	n.blocks[hash] = block
 	n.index[hash] = index
+}
+
+// SetMempool names the transactions the node would mine next. The block
+// template carries them, and that template is the whole mempool view.
+func (n *FakeNode) SetMempool(txs []chain.Transaction) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.mempool = txs
 }
 
 // Reorg drops every block above height, so the next sync pass finds a fork.
@@ -136,6 +146,18 @@ func (n *FakeNode) dispatch(req request) (any, error) {
 			return nil, fmt.Errorf("no index for block %s", hash)
 		}
 		return index, nil
+
+	case "get_block_template":
+		var merkle chain.Hash
+		if len(n.chainT) > 0 {
+			merkle = n.blocks[n.chainT[len(n.chainT)-1]].Header.MerkleRoot
+		}
+		return chain.BlockTemplate{
+			Block: chain.Block{
+				Header: chain.Header{MerkleRoot: merkle},
+				Body:   chain.Body{Transactions: n.mempool},
+			},
+		}, nil
 
 	case "submit_transaction":
 		var params []json.RawMessage

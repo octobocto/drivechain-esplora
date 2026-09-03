@@ -52,13 +52,14 @@ func (s *Server) addressInfo(w http.ResponseWriter, r *http.Request) {
 	if s.failed(w, r, err) {
 		return
 	}
-	out := AddressInfo{ChainStats: TxoStats{
-		FundedTxoCount: stats.FundedCount,
-		FundedTxoSum:   stats.FundedSum,
-		SpentTxoCount:  stats.SpentCount,
-		SpentTxoSum:    stats.SpentSum,
-		TxCount:        stats.TxCount,
-	}}
+	pending, err := st.MempoolStats(r.Context(), column, key)
+	if s.failed(w, r, err) {
+		return
+	}
+	out := AddressInfo{
+		ChainStats:   newTxoStats(stats),
+		MempoolStats: newTxoStats(pending),
+	}
 	if column == store.ColumnScriptHash {
 		out.ScriptHash = r.PathValue("key")
 	} else {
@@ -76,7 +77,65 @@ func (s *Server) addressUTXOs(w http.ResponseWriter, r *http.Request) {
 	if s.failed(w, r, err) {
 		return
 	}
-	writeJSON(w, toUTXOs(rows))
+	spent, err := st.MempoolSpentOutpoints(r.Context())
+	if s.failed(w, r, err) {
+		return
+	}
+	pending, err := st.MempoolUTXOs(r.Context(), column, key)
+	if s.failed(w, r, err) {
+		return
+	}
+
+	// A coin the mempool spends leaves the balance at once, rather than at the
+	// next block.
+	out := make([]UTXO, 0, len(rows)+len(pending))
+	for _, row := range rows {
+		key := row.OutPoint.Key()
+		if spent[string(key[:])] {
+			continue
+		}
+		out = append(out, newUTXO(row))
+	}
+	for _, row := range pending {
+		out = append(out, newUTXO(row))
+	}
+	writeJSON(w, out)
+}
+
+// addressMempoolTxs lists the unconfirmed transactions that touch one address.
+func (s *Server) addressMempoolTxs(w http.ResponseWriter, r *http.Request) {
+	st, column, key, ok := s.addressKey(w, r)
+	if !ok {
+		return
+	}
+	txids, err := st.MempoolTxidsFor(r.Context(), column, key)
+	if s.failed(w, r, err) {
+		return
+	}
+	out, err := s.mempoolTxs(r, st, txids)
+	if s.failed(w, r, err) {
+		return
+	}
+	writeJSON(w, out)
+}
+
+// mempoolTxs reads a list of unconfirmed transactions. A transaction a block
+// took while this request ran drops out rather than failing the request.
+func (s *Server) mempoolTxs(
+	r *http.Request, st *store.Store, txids []chain.Hash,
+) ([]Tx, error) {
+	out := make([]Tx, 0, len(txids))
+	for _, txid := range txids {
+		row, err := st.MempoolTxRow(r.Context(), txid)
+		if errors.Is(err, store.ErrNotFound) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, newTx(row))
+	}
+	return out, nil
 }
 
 // addressTxs pages an address history, newest first. A client reads the last
@@ -115,7 +174,20 @@ func (s *Server) addressTxs(w http.ResponseWriter, r *http.Request) {
 	if s.failed(w, r, err) {
 		return
 	}
+
+	// The first page carries the unconfirmed rows, newest first, the way an
+	// Esplora client reads them. A later page carries mined rows alone.
 	out := make([]Tx, 0, len(refs))
+	if lastSeen == "" {
+		txids, err := st.MempoolTxidsFor(r.Context(), column, key)
+		if s.failed(w, r, err) {
+			return
+		}
+		out, err = s.mempoolTxs(r, st, txids)
+		if s.failed(w, r, err) {
+			return
+		}
+	}
 	for _, ref := range refs {
 		row, err := st.Tx(r.Context(), ref.Txid)
 		if errors.Is(err, store.ErrNotFound) {
@@ -183,6 +255,16 @@ func (s *Server) deposits(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, toUTXOs(rows))
+}
+
+func newTxoStats(s store.TxoStats) TxoStats {
+	return TxoStats{
+		FundedTxoCount: s.FundedCount,
+		FundedTxoSum:   s.FundedSum,
+		SpentTxoCount:  s.SpentCount,
+		SpentTxoSum:    s.SpentSum,
+		TxCount:        s.TxCount,
+	}
 }
 
 func toUTXOs(rows []store.UTXO) []UTXO {
