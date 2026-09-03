@@ -71,6 +71,15 @@ type Block struct {
 	Body   Body   `json:"body"`
 }
 
+// BlockTemplate is what get_block_template returns: the block the node would
+// mine next. Its body carries every transaction the node accepted and no block
+// holds yet, so that body is the mempool.
+type BlockTemplate struct {
+	CriticalHash Hash  `json:"critical_hash"`
+	Block        Block `json:"block"`
+	FeesSats     int64 `json:"fees_sats"`
+}
+
 // AuthorizationsFor returns the signatures that cover one transaction. The body
 // holds a flat list, one signature per input, in transaction order.
 func (b *Body) AuthorizationsFor(txIndex int) ([]Authorization, error) {
@@ -99,13 +108,16 @@ type Content struct {
 	Type string
 }
 
-// Decoder reads the chain-specific part of an output. Everything else in a
+// Decoder reads the chain-specific part of a transaction. Everything else in a
 // rust sidechain block is identical across chains.
 type Decoder interface {
 	// Name is the chain name, as it appears in the chain registry.
 	Name() string
 	// DecodeContent reads one output payload.
 	DecodeContent(raw json.RawMessage) (Content, error)
+	// IdentifyTx names one transaction. A block index carries the txid, the
+	// size and the encoding; a block template carries none of the three.
+	IdentifyTx(tx Transaction) (TxInfo, error)
 }
 
 // TxInfo names one transaction. A body carries neither field: a txid is a

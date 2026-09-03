@@ -89,3 +89,13 @@ func (n *Node) SubmitTransaction(ctx context.Context, tx any) (Hash, error) {
 	}
 	return txid, nil
 }
+
+// BlockTemplate returns the block the node would mine next. Its body holds the
+// transactions the node accepted and no block carries yet.
+func (n *Node) BlockTemplate(ctx context.Context) (*BlockTemplate, error) {
+	var template *BlockTemplate
+	if err := n.rpc.Call(ctx, "get_block_template", nil, &template); err != nil {
+		return nil, fmt.Errorf("get block template: %w", err)
+	}
+	return template, nil
+}
