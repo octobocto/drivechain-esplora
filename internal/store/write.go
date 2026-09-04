@@ -51,6 +51,9 @@ type Block struct {
 	PrevHash   *chain.Hash
 	MerkleRoot chain.Hash
 	MainHash   chain.BitcoinHash
+	// MainHeight is the height of that mainchain block. An index that reads no
+	// enforcer leaves it empty.
+	MainHeight *uint32
 	BlockTime  *int64
 	Txs        []Tx
 	Creates    []Output
@@ -103,11 +106,16 @@ func insertBlock(ctx context.Context, tx pgx.Tx, b Block) error {
 	if b.PrevHash != nil {
 		prev = b.PrevHash[:]
 	}
+	var mainHeight *int32
+	if b.MainHeight != nil {
+		h := int32(*b.MainHeight)
+		mainHeight = &h
+	}
 	_, err := tx.Exec(ctx,
-		`INSERT INTO blocks (height, hash, prev_hash, merkle_root, main_hash, block_time, tx_count)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+		`INSERT INTO blocks (height, hash, prev_hash, merkle_root, main_hash, main_height, block_time, tx_count)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
 		int32(b.Height), b.Hash[:], prev, b.MerkleRoot[:], b.MainHash[:],
-		b.BlockTime, int32(len(b.Txs)))
+		mainHeight, b.BlockTime, int32(len(b.Txs)))
 	if err != nil {
 		return fmt.Errorf("insert block %d (%s): %w", b.Height, b.Hash, err)
 	}

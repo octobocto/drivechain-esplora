@@ -118,7 +118,19 @@ func run() error {
 	go mempoolNodes.Run(ctx)
 	go stores.Run(ctx)
 
+	// The enforcer holds the mainchain's view of every sidechain. Without one
+	// the index still serves its own chain, and the drivechain routes say they
+	// have no source.
+	var enforcer *mainchain.Enforcer
+	if cfg.enforcerURL != "" {
+		enforcer = mainchain.New(cfg.enforcerURL)
+		log.Info("reading the sidechain escrow", "enforcer", cfg.enforcerURL)
+	}
+
 	syncer := index.NewSyncer(nodes, stores, decoder, nil, log)
+	if enforcer != nil {
+		syncer.Heights = enforcer
+	}
 	go func() {
 		if err := syncer.Run(ctx); err != nil && ctx.Err() == nil {
 			log.Error("sync stopped", "error", err)
@@ -132,18 +144,15 @@ func run() error {
 		}
 	}()
 
-	// The enforcer holds the mainchain's view of every sidechain. Without one
-	// the index still serves its own chain, and the drivechain routes say they
-	// have no source.
-	var enforcer api.Mainchain
-	if cfg.enforcerURL != "" {
-		enforcer = mainchain.New(cfg.enforcerURL)
-		log.Info("reading the sidechain escrow", "enforcer", cfg.enforcerURL)
+	var chainView api.Mainchain
+	if enforcer != nil {
+		chainView = enforcer
 	}
 
 	server := &http.Server{
-		Addr:              listen,
-		Handler:           api.NewServer(stores, index.NewBroadcaster(nodes), enforcer, log).Handler(),
+		Addr: listen,
+		Handler: api.NewServer(stores, index.NewBroadcaster(nodes), chainView,
+			index.NewWithdrawals(nodes), log).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
