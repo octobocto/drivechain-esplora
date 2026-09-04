@@ -168,3 +168,24 @@ func (e *Enforcer) post(ctx context.Context, method, body string, out any) error
 	}
 	return nil
 }
+
+// BlockHeight reads the height of one mainchain block. A sidechain header
+// names the mainchain block it merge mined against, and that hash alone tells
+// a reader nothing.
+//
+// A hash the enforcer does not hold answers false.
+func (e *Enforcer) BlockHeight(ctx context.Context, hash string) (uint32, bool, error) {
+	var resp struct {
+		HeaderInfos []struct {
+			Height uint32 `json:"height"`
+		} `json:"headerInfos"`
+	}
+	body := fmt.Sprintf(`{"blockHash":{"hex":%q}}`, hash)
+	if err := e.post(ctx, "GetBlockHeaderInfo", body, &resp); err != nil {
+		return 0, false, err
+	}
+	if len(resp.HeaderInfos) == 0 {
+		return 0, false, nil
+	}
+	return resp.HeaderInfos[0].Height, true, nil
+}

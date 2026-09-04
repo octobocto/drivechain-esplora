@@ -22,6 +22,9 @@ const blockListSize = 10
 // recentListSize is how many rows /mempool/recent returns.
 const recentListSize = 10
 
+// activityListSize is how many rows /txs/recent returns.
+const activityListSize = 25
+
 // FeeRateSatPerVByte is what /fee-estimates answers for every target. These
 // chains have no fee market, and a client calls this before every send.
 const FeeRateSatPerVByte = 1.0
@@ -29,6 +32,13 @@ const FeeRateSatPerVByte = 1.0
 // Broadcaster hands a signed transaction to the node.
 type Broadcaster interface {
 	Broadcast(ctx context.Context, tx json.RawMessage) (chain.Hash, error)
+}
+
+// Withdrawals reads the node's withdrawal bundle state. A deployment with no
+// node leaves this nil, and the withdrawal route then says it has no source.
+type Withdrawals interface {
+	Pending(ctx context.Context) (json.RawMessage, error)
+	LastFailedHeight(ctx context.Context) (*uint32, error)
 }
 
 // Mainchain reads the BIP300 view of the mainchain. A deployment with no
@@ -44,6 +54,7 @@ type Server struct {
 	stores      *service.Service[*store.Store]
 	broadcaster Broadcaster
 	mainchain   Mainchain
+	withdrawals Withdrawals
 	log         *slog.Logger
 }
 
@@ -53,9 +64,16 @@ func NewServer(
 	stores *service.Service[*store.Store],
 	broadcaster Broadcaster,
 	mainchain Mainchain,
+	withdrawals Withdrawals,
 	log *slog.Logger,
 ) *Server {
-	return &Server{stores: stores, broadcaster: broadcaster, mainchain: mainchain, log: log}
+	return &Server{
+		stores:      stores,
+		broadcaster: broadcaster,
+		mainchain:   mainchain,
+		withdrawals: withdrawals,
+		log:         log,
+	}
 }
 
 // Handler builds the router.
@@ -97,6 +115,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /deposits", s.deposits)
 	mux.HandleFunc("GET /deposits/{start_height}", s.deposits)
 
+	mux.HandleFunc("GET /txs/recent", s.recentActivity)
+	mux.HandleFunc("GET /block/{hash}/activity", s.blockActivity)
+
 	mux.HandleFunc("GET /mempool", s.mempool)
 	mux.HandleFunc("GET /mempool/txids", s.mempoolTxids)
 	mux.HandleFunc("GET /mempool/recent", s.mempoolRecent)
@@ -105,6 +126,7 @@ func (s *Server) Handler() http.Handler {
 	// A sidechain lives inside the mainchain's hashrate escrow. These read that
 	// escrow, so a wallet with no local node still sees which chains exist and
 	// what each treasury holds.
+	mux.HandleFunc("GET /drivechain/withdrawals", s.drivechainWithdrawals)
 	mux.HandleFunc("GET /drivechain/sidechains", s.drivechainSidechains)
 	mux.HandleFunc("GET /drivechain/sidechain/{slot}", s.drivechainSidechain)
 

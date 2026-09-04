@@ -129,6 +129,13 @@ type Block struct {
 	// MainchainHash is the mainchain block this header points at. A sidechain
 	// header carries no timestamp of its own.
 	MainchainHash string `json:"mainchain_blockhash"`
+	// MainchainHeight is the height of that block. It is empty on an index
+	// that reads no enforcer.
+	MainchainHeight *uint32 `json:"mainchain_height"`
+	// Fees is what every transaction in the block paid together.
+	Fees int64 `json:"fees"`
+	// Value is what the block's transactions paid out together.
+	Value int64 `json:"value"`
 }
 
 // BlockStatus answers /block/{hash}/status.
@@ -227,12 +234,15 @@ func newUTXO(u store.UTXO) UTXO {
 
 func newBlock(b store.BlockRow) Block {
 	out := Block{
-		ID:            b.Hash.String(),
-		Height:        b.Height,
-		Timestamp:     b.BlockTime,
-		TxCount:       b.TxCount,
-		MerkleRoot:    b.MerkleRoot.String(),
-		MainchainHash: b.MainHash.String(),
+		ID:              b.Hash.String(),
+		Height:          b.Height,
+		Timestamp:       b.BlockTime,
+		TxCount:         b.TxCount,
+		MerkleRoot:      b.MerkleRoot.String(),
+		MainchainHash:   b.MainHash.String(),
+		MainchainHeight: b.MainHeight,
+		Fees:            b.FeeSats,
+		Value:           b.ValueSats,
 	}
 	if b.PrevHash != nil {
 		prev := b.PrevHash.String()

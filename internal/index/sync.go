@@ -23,6 +23,13 @@ type TimeSource interface {
 	BlockTime(ctx context.Context, mainHash chain.BitcoinHash) (int64, error)
 }
 
+// HeightSource reads the height of a mainchain block. A sidechain header names
+// the block it merge mined against by hash alone, and a reader needs the
+// height.
+type HeightSource interface {
+	BlockHeight(ctx context.Context, hash string) (uint32, bool, error)
+}
+
 // Syncer walks the chain forward and keeps the index level with the node.
 //
 // The node and the database each sit behind a service wrapper, so neither one
@@ -40,6 +47,10 @@ type Syncer struct {
 	// Interval is how long the syncer waits after it reaches the tip. A coin
 	// becomes spendable at its block, so this bounds how long a wallet waits.
 	Interval time.Duration
+
+	// Heights resolves the mainchain block a header names. A nil one leaves
+	// every block without a mainchain height.
+	Heights HeightSource
 }
 
 // NewSyncer builds a syncer. A nil TimeSource leaves every block time empty.
@@ -113,6 +124,37 @@ func (s *Syncer) Once(ctx context.Context) error {
 		if !applied {
 			// The node moved under us. The next pass picks it up.
 			return nil
+		}
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+	}
+	return s.backfillMainHeights(ctx)
+}
+
+// backfillHeightsPerPass bounds how many enforcer calls one pass makes. A
+// chain indexed before the mainchain height existed fills in over a few
+// passes rather than in one long stall.
+const backfillHeightsPerPass = 20
+
+// backfillMainHeights fills the mainchain height of blocks that carry none.
+// It is safe to run on every pass: a chain with none left reads one row and
+// stops.
+func (s *Syncer) backfillMainHeights(ctx context.Context) error {
+	if s.Heights == nil {
+		return nil
+	}
+	blocks, err := s.store.BlocksMissingMainHeight(ctx, backfillHeightsPerPass)
+	if err != nil {
+		return err
+	}
+	for _, block := range blocks {
+		height := s.mainHeight(ctx, block.MainHash)
+		if height == nil {
+			continue
+		}
+		if err := s.store.SetMainHeight(ctx, block.Height, *height); err != nil {
+			return err
 		}
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -208,6 +250,7 @@ func (s *Syncer) applyHeight(ctx context.Context, height uint32) (bool, error) {
 	if err != nil {
 		return false, err
 	}
+	write.MainHeight = s.mainHeight(ctx, block.Header.PrevMainHash)
 
 	result, err := s.store.Apply(ctx, write)
 	if err != nil {
@@ -218,6 +261,24 @@ func (s *Syncer) applyHeight(ctx context.Context, height uint32) (bool, error) {
 			"height", height, "hash", hash, "count", result.UnknownSpends)
 	}
 	return true, nil
+}
+
+// mainHeight reads the height of the mainchain block a header names. The
+// index serves its own chain with or without an answer, so a failed read logs
+// and leaves the height empty rather than stopping the sync.
+func (s *Syncer) mainHeight(ctx context.Context, mainHash chain.BitcoinHash) *uint32 {
+	if s.Heights == nil {
+		return nil
+	}
+	height, found, err := s.Heights.BlockHeight(ctx, mainHash.String())
+	if err != nil {
+		s.log.Warn("read the mainchain height", "hash", mainHash, "error", err)
+		return nil
+	}
+	if !found {
+		return nil
+	}
+	return &height
 }
 
 func (s *Syncer) blockTime(ctx context.Context, mainHash chain.BitcoinHash) (*int64, error) {
