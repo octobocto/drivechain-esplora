@@ -21,8 +21,15 @@ type BlockRow struct {
 	PrevHash   *chain.Hash
 	MerkleRoot chain.Hash
 	MainHash   chain.BitcoinHash
+	// MainHeight is the height of that mainchain block. It is empty on an
+	// index that reads no enforcer.
+	MainHeight *uint32
 	BlockTime  *int64
 	TxCount    int
+	// FeeSats is what every transaction in the block paid together.
+	FeeSats int64
+	// ValueSats is what the block's transactions paid out together.
+	ValueSats int64
 }
 
 // TxRow is one indexed transaction, with the coins on both sides.
@@ -55,27 +62,32 @@ type Coin struct {
 	SpentHeight *uint32
 }
 
-const blockColumns = `height, hash, prev_hash, merkle_root, main_hash, block_time, tx_count`
+const blockColumns = `b.height, b.hash, b.prev_hash, b.merkle_root, b.main_hash,
+	b.main_height, b.block_time, b.tx_count,
+	COALESCE((SELECT SUM(t.fee_sats) FROM txs t WHERE t.height = b.height), 0),
+	COALESCE((SELECT SUM(o.value_sats) FROM outputs o
+	          JOIN txs t ON t.txid = o.source_id
+	          WHERE t.height = b.height AND o.kind = 0), 0)`
 
 // BlockByHash reads one block header.
 func (s *Store) BlockByHash(ctx context.Context, hash chain.Hash) (BlockRow, error) {
 	row := s.pool.QueryRow(ctx,
-		`SELECT `+blockColumns+` FROM blocks WHERE hash = $1`, hash[:])
+		`SELECT `+blockColumns+` FROM blocks b WHERE b.hash = $1`, hash[:])
 	return scanBlock(row)
 }
 
 // BlockAtHeight reads the block header at one height.
 func (s *Store) BlockAtHeight(ctx context.Context, height uint32) (BlockRow, error) {
 	row := s.pool.QueryRow(ctx,
-		`SELECT `+blockColumns+` FROM blocks WHERE height = $1`, int32(height))
+		`SELECT `+blockColumns+` FROM blocks b WHERE b.height = $1`, int32(height))
 	return scanBlock(row)
 }
 
 // Blocks lists up to limit block headers at or below startHeight, newest first.
 func (s *Store) Blocks(ctx context.Context, startHeight uint32, limit int) ([]BlockRow, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT `+blockColumns+` FROM blocks WHERE height <= $1
-		 ORDER BY height DESC LIMIT $2`, int32(startHeight), limit)
+		`SELECT `+blockColumns+` FROM blocks b WHERE b.height <= $1
+		 ORDER BY b.height DESC LIMIT $2`, int32(startHeight), limit)
 	if err != nil {
 		return nil, fmt.Errorf("read blocks: %w", err)
 	}
@@ -101,15 +113,17 @@ type scannable interface {
 
 func scanBlock(row scannable) (BlockRow, error) {
 	var (
-		out    BlockRow
-		height int32
-		hash   []byte
-		prev   []byte
-		merkle []byte
-		main   []byte
-		count  int32
+		out        BlockRow
+		height     int32
+		hash       []byte
+		prev       []byte
+		merkle     []byte
+		main       []byte
+		mainHeight *int32
+		count      int32
 	)
-	err := row.Scan(&height, &hash, &prev, &merkle, &main, &out.BlockTime, &count)
+	err := row.Scan(&height, &hash, &prev, &merkle, &main, &mainHeight,
+		&out.BlockTime, &count, &out.FeeSats, &out.ValueSats)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return BlockRow{}, ErrNotFound
 	}
@@ -118,6 +132,10 @@ func scanBlock(row scannable) (BlockRow, error) {
 	}
 	out.Height = uint32(height)
 	out.TxCount = int(count)
+	if mainHeight != nil {
+		h := uint32(*mainHeight)
+		out.MainHeight = &h
+	}
 	copy(out.Hash[:], hash)
 	copy(out.MerkleRoot[:], merkle)
 	copy(out.MainHash[:], main)
@@ -256,4 +274,40 @@ func (s *Store) coins(ctx context.Context, where string, args ...any) ([]Coin, e
 		return nil, fmt.Errorf("read coin rows: %w", err)
 	}
 	return out, nil
+}
+
+// BlocksMissingMainHeight lists blocks whose mainchain height is unresolved,
+// newest first. A block indexed before the column existed reads this way.
+func (s *Store) BlocksMissingMainHeight(ctx context.Context, limit int) ([]BlockRow, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT `+blockColumns+` FROM blocks b WHERE b.main_height IS NULL
+		 ORDER BY b.height DESC LIMIT $1`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("read blocks with no mainchain height: %w", err)
+	}
+	defer rows.Close()
+
+	var out []BlockRow
+	for rows.Next() {
+		block, err := scanBlock(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, block)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read block rows: %w", err)
+	}
+	return out, nil
+}
+
+// SetMainHeight records the height of the mainchain block a header names.
+func (s *Store) SetMainHeight(ctx context.Context, height, mainHeight uint32) error {
+	_, err := s.pool.Exec(ctx,
+		`UPDATE blocks SET main_height = $2 WHERE height = $1`,
+		int32(height), int32(mainHeight))
+	if err != nil {
+		return fmt.Errorf("set the mainchain height of block %d: %w", height, err)
+	}
+	return nil
 }

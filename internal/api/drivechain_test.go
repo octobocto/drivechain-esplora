@@ -28,7 +28,7 @@ func (s *stubMainchain) Ctip(_ context.Context, slot uint32) (mainchain.Ctip, bo
 }
 
 func drivechainServer(mc Mainchain) http.Handler {
-	return NewServer(nil, nil, mc, slog.New(slog.DiscardHandler)).Handler()
+	return NewServer(nil, nil, mc, nil, slog.New(slog.DiscardHandler)).Handler()
 }
 
 func stub() *stubMainchain {

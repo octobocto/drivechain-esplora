@@ -97,7 +97,7 @@ func newHarness(t *testing.T) *harness {
 	}, nil)
 
 	server := httptest.NewServer(
-		api.NewServer(stores, index.NewBroadcaster(nodes), nil, quiet()).Handler())
+		api.NewServer(stores, index.NewBroadcaster(nodes), nil, index.NewWithdrawals(nodes), quiet()).Handler())
 	t.Cleanup(server.Close)
 
 	return &harness{
@@ -390,7 +390,7 @@ func TestAPISurvivesADownDatabase(t *testing.T) {
 	stores := service.New("database", quiet(), func(context.Context) (*store.Store, error) {
 		return nil, fmt.Errorf("connection refused")
 	}, nil)
-	server := httptest.NewServer(api.NewServer(stores, nil, nil, quiet()).Handler())
+	server := httptest.NewServer(api.NewServer(stores, nil, nil, nil, quiet()).Handler())
 	defer server.Close()
 
 	resp, err := http.Get(server.URL + "/blocks/tip/height")

@@ -2,6 +2,7 @@ package chain
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 )
@@ -98,4 +99,27 @@ func (n *Node) BlockTemplate(ctx context.Context) (*BlockTemplate, error) {
 		return nil, fmt.Errorf("get block template: %w", err)
 	}
 	return template, nil
+}
+
+// PendingWithdrawalBundle reads the bundle the node proposes to the mainchain,
+// as the node writes it. A chain with no bundle answers nil.
+//
+// The index holds no bundle model. It carries the node's own JSON, so a client
+// reads one shape whether it runs a node or not.
+func (n *Node) PendingWithdrawalBundle(ctx context.Context) (json.RawMessage, error) {
+	var bundle json.RawMessage
+	if err := n.rpc.Call(ctx, "pending_withdrawal_bundle", nil, &bundle); err != nil {
+		return nil, err
+	}
+	return bundle, nil
+}
+
+// LatestFailedWithdrawalBundleHeight is the sidechain height of the last
+// bundle the mainchain rejected. A chain that never failed one answers nil.
+func (n *Node) LatestFailedWithdrawalBundleHeight(ctx context.Context) (*uint32, error) {
+	var height *uint32
+	if err := n.rpc.Call(ctx, "latest_failed_withdrawal_bundle_height", nil, &height); err != nil {
+		return nil, err
+	}
+	return height, nil
 }

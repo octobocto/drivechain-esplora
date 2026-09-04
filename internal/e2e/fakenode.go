@@ -24,6 +24,10 @@ type FakeNode struct {
 	submitted []json.RawMessage
 	// mempool holds the transactions the node would mine next.
 	mempool []chain.Transaction
+	// bundle is what pending_withdrawal_bundle answers.
+	bundle json.RawMessage
+	// failedHeight is what latest_failed_withdrawal_bundle_height answers.
+	failedHeight *uint32
 
 	server *httptest.Server
 }
@@ -46,6 +50,14 @@ func (n *FakeNode) Submitted() []json.RawMessage {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	return append([]json.RawMessage(nil), n.submitted...)
+}
+
+// SetWithdrawalBundle sets what the bundle routes answer.
+func (n *FakeNode) SetWithdrawalBundle(bundle json.RawMessage, failedHeight *uint32) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.bundle = bundle
+	n.failedHeight = failedHeight
 }
 
 // Close stops the listener.
@@ -146,6 +158,12 @@ func (n *FakeNode) dispatch(req request) (any, error) {
 			return nil, fmt.Errorf("no index for block %s", hash)
 		}
 		return index, nil
+
+	case "pending_withdrawal_bundle":
+		return n.bundle, nil
+
+	case "latest_failed_withdrawal_bundle_height":
+		return n.failedHeight, nil
 
 	case "get_block_template":
 		var merkle chain.Hash
