@@ -14,9 +14,9 @@ import (
 
 // MempoolSyncer keeps the unconfirmed set level with the node.
 //
-// The node names the transactions it would mine next, which is its mempool. A
-// pass replaces the whole snapshot, so a transaction the node dropped leaves
-// the index with it.
+// The node names the transactions it accepted and no block carries yet. A pass
+// replaces the whole snapshot, so a transaction the node dropped leaves the
+// index with it.
 type MempoolSyncer struct {
 	nodes   *service.Service[*chain.Node]
 	stores  *service.Service[*store.Store]
@@ -79,16 +79,13 @@ func (s *MempoolSyncer) Once(ctx context.Context) error {
 		return err
 	}
 
-	template, err := node.BlockTemplate(ctx)
+	txs, err := node.ListMempool(ctx)
 	if err != nil {
 		s.nodes.Drop()
-		return fmt.Errorf("read the block template: %w", err)
-	}
-	if template == nil {
-		return errors.New("the node answered with no block template")
+		return fmt.Errorf("read the mempool: %w", err)
 	}
 
-	pool, err := PrepareMempool(template.Block.Body.Transactions, s.decoder)
+	pool, err := PrepareMempool(txs, s.decoder)
 	if err != nil {
 		return err
 	}

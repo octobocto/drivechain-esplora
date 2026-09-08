@@ -71,15 +71,6 @@ type Block struct {
 	Body   Body   `json:"body"`
 }
 
-// BlockTemplate is what get_block_template returns: the block the node would
-// mine next. Its body carries every transaction the node accepted and no block
-// holds yet, so that body is the mempool.
-type BlockTemplate struct {
-	CriticalHash Hash  `json:"critical_hash"`
-	Block        Block `json:"block"`
-	FeesSats     int64 `json:"fees_sats"`
-}
-
 // AuthorizationsFor returns the signatures that cover one transaction. The body
 // holds a flat list, one signature per input, in transaction order.
 func (b *Body) AuthorizationsFor(txIndex int) ([]Authorization, error) {
@@ -115,18 +106,23 @@ type Decoder interface {
 	Name() string
 	// DecodeContent reads one output payload.
 	DecodeContent(raw json.RawMessage) (Content, error)
-	// IdentifyTx names one transaction. A block index carries the txid, the
-	// size and the encoding; a block template carries none of the three.
-	IdentifyTx(tx Transaction) (TxInfo, error)
 }
 
 // TxInfo names one transaction. A body carries neither field: a txid is a
 // blake3 digest over the borsh encoding, and a size is that encoding's length.
+// The node computes all three, so no chain-specific encoder runs here.
 type TxInfo struct {
 	Txid Hash   `json:"txid"`
 	Size uint64 `json:"size"`
 	// Raw is the borsh encoding. It is what /tx/{txid}/hex serves.
 	Raw Bytes `json:"raw"`
+}
+
+// MempoolTx is one entry of list_mempool. It carries the whole transaction
+// beside the identity the node computed for it.
+type MempoolTx struct {
+	TxInfo
+	Tx Transaction `json:"tx"`
 }
 
 // BlockIndex carries everything a block body does not. A transaction has no

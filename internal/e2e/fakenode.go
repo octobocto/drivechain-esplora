@@ -22,8 +22,9 @@ type FakeNode struct {
 	// submitted holds every transaction a broadcast handed over, so a test
 	// reads what reached the node.
 	submitted []json.RawMessage
-	// mempool holds the transactions the node would mine next.
-	mempool []chain.Transaction
+	// mempool holds the transactions the node accepted and no block carries
+	// yet.
+	mempool []chain.MempoolTx
 
 	server *httptest.Server
 }
@@ -60,9 +61,10 @@ func (n *FakeNode) AddBlock(hash chain.Hash, block *chain.Block, index chain.Blo
 	n.index[hash] = index
 }
 
-// SetMempool names the transactions the node would mine next. The block
-// template carries them, and that template is the whole mempool view.
-func (n *FakeNode) SetMempool(txs []chain.Transaction) {
+// SetMempool names the transactions the node accepted and no block carries
+// yet. list_mempool answers with them, and that answer is the whole mempool
+// view.
+func (n *FakeNode) SetMempool(txs []chain.MempoolTx) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	n.mempool = txs
@@ -147,17 +149,8 @@ func (n *FakeNode) dispatch(req request) (any, error) {
 		}
 		return index, nil
 
-	case "get_block_template":
-		var merkle chain.Hash
-		if len(n.chainT) > 0 {
-			merkle = n.blocks[n.chainT[len(n.chainT)-1]].Header.MerkleRoot
-		}
-		return chain.BlockTemplate{
-			Block: chain.Block{
-				Header: chain.Header{MerkleRoot: merkle},
-				Body:   chain.Body{Transactions: n.mempool},
-			},
-		}, nil
+	case "list_mempool":
+		return n.mempool, nil
 
 	case "submit_transaction":
 		var params []json.RawMessage

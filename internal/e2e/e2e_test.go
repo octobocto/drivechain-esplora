@@ -475,13 +475,12 @@ func TestUnconfirmedPaymentReachesTheAPI(t *testing.T) {
 			{Address: alice, Content: value(9000)},
 		},
 	}
-	info, err := thunder.Decoder{}.IdentifyTx(tx)
-	if err != nil {
-		t.Fatalf("identify: %v", err)
-	}
+	// list_mempool names the txid, the size and the encoding, so the test
+	// names them too.
+	info := chain.TxInfo{Txid: hash(0xc1), Size: 8, Raw: make(chain.Bytes, 64)}
 	txid := info.Txid.String()
 
-	h.node.SetMempool([]chain.Transaction{tx})
+	h.node.SetMempool([]chain.MempoolTx{{TxInfo: info, Tx: tx}})
 	h.syncMempool(t)
 
 	// Bob sees the payment, and it counts as unconfirmed.
@@ -606,12 +605,11 @@ func TestABlockTakesOverTheUnconfirmedPayment(t *testing.T) {
 		Inputs:  []chain.Input{{OutPoint: coin, LeafHash: make(chain.Bytes, 32)}},
 		Outputs: []chain.Output{{Address: bob, Content: value(49000)}},
 	}
-	info, err := thunder.Decoder{}.IdentifyTx(tx)
-	if err != nil {
-		t.Fatalf("identify: %v", err)
-	}
+	// The block index must name the same identity the mempool entry did, or
+	// the coin would read twice.
+	info := chain.TxInfo{Txid: hash(0xc2), Size: 8, Raw: make(chain.Bytes, 64)}
 
-	h.node.SetMempool([]chain.Transaction{tx})
+	h.node.SetMempool([]chain.MempoolTx{{TxInfo: info, Tx: tx}})
 	h.syncMempool(t)
 
 	// The same transaction now arrives in a block, before the poller runs
