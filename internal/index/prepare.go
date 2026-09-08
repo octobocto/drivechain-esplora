@@ -148,28 +148,24 @@ func prepareTx(txid chain.Hash, tx chain.Transaction, decoder chain.Decoder) (tx
 	return out, nil
 }
 
-// PrepareMempool turns the transactions of a block template into the whole
-// unconfirmed set. A pass replaces that set, so a transaction the node dropped
-// leaves the index with it.
+// PrepareMempool turns what list_mempool returned into the whole unconfirmed
+// set. A pass replaces that set, so a transaction the node dropped leaves the
+// index with it.
 //
-// A template names no txid and no size, so the chain identifies each
-// transaction from its own encoding.
-func PrepareMempool(txs []chain.Transaction, decoder chain.Decoder) (store.Mempool, error) {
+// The node names each txid, each size and each borsh encoding, so this service
+// never re-encodes a transaction.
+func PrepareMempool(txs []chain.MempoolTx, decoder chain.Decoder) (store.Mempool, error) {
 	var out store.Mempool
-	for i, tx := range txs {
-		info, err := decoder.IdentifyTx(tx)
-		if err != nil {
-			return store.Mempool{}, fmt.Errorf("identify mempool transaction %d: %w", i, err)
-		}
-		rows, err := prepareTx(info.Txid, tx, decoder)
+	for i, entry := range txs {
+		rows, err := prepareTx(entry.Txid, entry.Tx, decoder)
 		if err != nil {
 			return store.Mempool{}, err
 		}
 		out.Txs = append(out.Txs, store.MempoolTx{
-			Txid:      info.Txid,
+			Txid:      entry.Txid,
 			Index:     i,
-			SizeBytes: int(info.Size),
-			Raw:       info.Raw,
+			SizeBytes: int(entry.Size),
+			Raw:       entry.Raw,
 		})
 		out.Spends = append(out.Spends, rows.Spends...)
 		out.Creates = append(out.Creates, rows.Creates...)

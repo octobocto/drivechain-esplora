@@ -90,12 +90,12 @@ func (n *Node) SubmitTransaction(ctx context.Context, tx any) (Hash, error) {
 	return txid, nil
 }
 
-// BlockTemplate returns the block the node would mine next. Its body holds the
-// transactions the node accepted and no block carries yet.
-func (n *Node) BlockTemplate(ctx context.Context) (*BlockTemplate, error) {
-	var template *BlockTemplate
-	if err := n.rpc.Call(ctx, "get_block_template", nil, &template); err != nil {
-		return nil, fmt.Errorf("get block template: %w", err)
+// ListMempool returns the transactions the node accepted and no block carries
+// yet. Each entry names its own txid, size and borsh encoding.
+func (n *Node) ListMempool(ctx context.Context) ([]MempoolTx, error) {
+	var txs []MempoolTx
+	if err := n.rpc.Call(ctx, "list_mempool", nil, &txs); err != nil {
+		return nil, fmt.Errorf("list the mempool: %w", err)
 	}
-	return template, nil
+	return txs, nil
 }
