@@ -2,9 +2,8 @@ package bitnames
 
 import "testing"
 
-// A withdrawal removes both its payout and its mainchain fee from the
-// sidechain, because the enforcer pays both out of the treasury. A bitname and
-// a reservation hold a name, not a coin.
+// A block body carries OutputContent; a block index deposit carries
+// FilledOutputContent. One decoder reads both, so both spellings appear here.
 func TestDecodeContent(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -12,36 +11,22 @@ func TestDecodeContent(t *testing.T) {
 		wantSats int64
 		wantType string
 	}{
+		{"body bitcoin", `{"BitcoinSats":21000}`, 21000, "value"},
+		{"body zero bitcoin", `{"BitcoinSats":0}`, 0, "value"},
+		{"body bitname", `"BitName"`, 0, "bitname"},
+		{"body reservation", `"BitNameReservation"`, 0, "bitname_reservation"},
 		{
-			name:     "bitcoin",
-			raw:      `{"BitcoinSats":21000}`,
-			wantSats: 21000,
-			wantType: "value",
+			"body withdrawal adds the mainchain fee",
+			`{"Withdrawal":{"value_sats":1000,"main_fee_sats":250,"main_address":"tb1q"}}`,
+			1250, "withdrawal",
 		},
 		{
-			name:     "withdrawal adds the mainchain fee",
-			raw:      `{"Withdrawal":{"value_sats":1000,"main_fee_sats":250,"main_address":"tb1qexample"}}`,
-			wantSats: 1250,
-			wantType: "withdrawal",
+			"filled withdrawal carries its own name",
+			`{"BitcoinWithdrawal":{"value_sats":1000,"main_fee_sats":250,"main_address":"tb1q"}}`,
+			1250, "withdrawal",
 		},
-		{
-			name:     "zero bitcoin",
-			raw:      `{"BitcoinSats":0}`,
-			wantSats: 0,
-			wantType: "value",
-		},
-		{
-			name:     "a bare bitname",
-			raw:      `"BitName"`,
-			wantSats: 0,
-			wantType: "bitname",
-		},
-		{
-			name:     "a bare reservation",
-			raw:      `"BitNameReservation"`,
-			wantSats: 0,
-			wantType: "bitname_reservation",
-		},
+		{"filled bitname holds its id", `{"BitName":"6f4a"}`, 0, "bitname"},
+		{"filled reservation holds its hash", `{"BitNameReservation":"9c1d"}`, 0, "bitname_reservation"},
 	}
 
 	for _, tc := range cases {
@@ -61,7 +46,7 @@ func TestDecodeContent(t *testing.T) {
 }
 
 func TestDecodeContentRejectsUnknown(t *testing.T) {
-	for _, raw := range []string{`{"Sideways":1}`, `{}`, `"nonsense"`} {
+	for _, raw := range []string{`{"Sideways":1}`, `{}`, `"nonsense"`, `{"a":1,"b":2}`} {
 		if _, err := (Decoder{}).DecodeContent([]byte(raw)); err == nil {
 			t.Errorf("want an error for %s, got none", raw)
 		}
@@ -79,10 +64,8 @@ func TestDecodeContentRejectsOverflow(t *testing.T) {
 // them, so both spellings must read the same amount.
 func TestDecodeWithdrawalTakesEitherSpelling(t *testing.T) {
 	cases := map[string]string{
-		"as the node writes it": `{"Withdrawal":{"value":1000,"main_fee":250,
-			"main_address":"tb1q"}}`,
-		"with the renamed fields": `{"Withdrawal":{"value_sats":1000,
-			"main_fee_sats":250,"main_address":"tb1q"}}`,
+		"as the node writes it":   `{"Withdrawal":{"value":1000,"main_fee":250,"main_address":"tb1q"}}`,
+		"with the renamed fields": `{"Withdrawal":{"value_sats":1000,"main_fee_sats":250,"main_address":"tb1q"}}`,
 	}
 	for name, raw := range cases {
 		t.Run(name, func(t *testing.T) {

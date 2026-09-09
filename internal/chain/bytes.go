@@ -38,3 +38,24 @@ func (b *Bytes) UnmarshalJSON(data []byte) error {
 	*b = numbers
 	return nil
 }
+
+// Variant reads the one key an externally tagged serde enum writes. A variant
+// with no field arrives as a bare string; every other variant arrives as a
+// one-key object. The payload is nil for the bare form.
+func Variant(raw json.RawMessage) (string, json.RawMessage, error) {
+	var tag string
+	if err := json.Unmarshal(raw, &tag); err == nil {
+		return tag, nil, nil
+	}
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &obj); err != nil {
+		return "", nil, fmt.Errorf("read output content %s: %w", raw, err)
+	}
+	if len(obj) != 1 {
+		return "", nil, fmt.Errorf("output content %s names %d variants, want 1", raw, len(obj))
+	}
+	for tag, payload := range obj {
+		return tag, payload, nil
+	}
+	return "", nil, fmt.Errorf("output content %s names no variant", raw)
+}

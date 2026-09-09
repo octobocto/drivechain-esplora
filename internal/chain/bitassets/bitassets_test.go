@@ -2,9 +2,11 @@ package bitassets
 
 import "testing"
 
-// Only a bitcoin output and a withdrawal hold satoshis. A bitasset amount
-// counts units of that asset, and a control output, a reservation and an
-// auction receipt hold no coin at all.
+// A block body carries OutputContent; a block index deposit carries
+// FilledOutputContent. One decoder reads both, so both spellings appear here.
+// A body writes BitAsset as an amount; a filled output writes an id and an
+// amount. An earlier decoder typed it as a number alone, so a deposit that
+// held an asset failed the whole block.
 func TestDecodeContent(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -12,17 +14,26 @@ func TestDecodeContent(t *testing.T) {
 		wantSats int64
 		wantType string
 	}{
-		{"bitcoin", `{"BitcoinSats":21000}`, 21000, "value"},
-		{"zero bitcoin", `{"BitcoinSats":0}`, 0, "value"},
-		{"a bitasset amount is not satoshis", `{"BitAsset":500}`, 0, "bitasset"},
+		{"body bitcoin", `{"BitcoinSats":21000}`, 21000, "value"},
+		{"body zero bitcoin", `{"BitcoinSats":0}`, 0, "value"},
+		{"body bitasset is an amount", `{"BitAsset":500}`, 0, "bitasset"},
+		{"filled bitasset is an id and an amount", `{"BitAsset":["4f2a",500]}`, 0, "bitasset"},
+		{"body control", `"BitAssetControl"`, 0, "bitasset_control"},
+		{"filled control holds its id", `{"BitAssetControl":"4f2a"}`, 0, "bitasset_control"},
+		{"body reservation", `"BitAssetReservation"`, 0, "bitasset_reservation"},
+		{"filled reservation holds its hash", `{"BitAssetReservation":"9c1d"}`, 0, "bitasset_reservation"},
+		{"body auction receipt", `"DutchAuctionReceipt"`, 0, "dutch_auction_receipt"},
+		{"filled auction receipt holds its id", `{"DutchAuctionReceipt":"1b7e"}`, 0, "dutch_auction_receipt"},
 		{
-			"withdrawal adds the mainchain fee",
-			`{"Withdrawal":{"value_sats":1000,"main_fee_sats":250,"main_address":"tb1qexample"}}`,
+			"body withdrawal adds the mainchain fee",
+			`{"Withdrawal":{"value_sats":1000,"main_fee_sats":250,"main_address":"tb1q"}}`,
 			1250, "withdrawal",
 		},
-		{"control", `"BitAssetControl"`, 0, "bitasset_control"},
-		{"reservation", `"BitAssetReservation"`, 0, "bitasset_reservation"},
-		{"auction receipt", `"DutchAuctionReceipt"`, 0, "dutch_auction_receipt"},
+		{
+			"filled withdrawal carries its own name",
+			`{"BitcoinWithdrawal":{"value_sats":1000,"main_fee_sats":250,"main_address":"tb1q"}}`,
+			1250, "withdrawal",
+		},
 	}
 
 	for _, tc := range cases {
@@ -42,7 +53,7 @@ func TestDecodeContent(t *testing.T) {
 }
 
 func TestDecodeContentRejectsUnknown(t *testing.T) {
-	for _, raw := range []string{`{"Sideways":1}`, `{}`, `"nonsense"`} {
+	for _, raw := range []string{`{"Sideways":1}`, `{}`, `"nonsense"`, `{"a":1,"b":2}`} {
 		if _, err := (Decoder{}).DecodeContent([]byte(raw)); err == nil {
 			t.Errorf("want an error for %s, got none", raw)
 		}
