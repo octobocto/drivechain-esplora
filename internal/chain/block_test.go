@@ -149,15 +149,16 @@ func TestInputRoundTrip(t *testing.T) {
 // The node serializes a Rust tuple, so a deposit and a bundle spend arrive as
 // two element pairs, not as objects. A real node caught this; a hand written
 // fixture did not.
-func TestBlockIndexDecodesTuplePairs(t *testing.T) {
+func TestBlockIndexDecodesNamedFields(t *testing.T) {
 	const wire = `{
 		"txs": [{"txid":"` + testHashHex + `","size":180,"raw":"0102"}],
 		"deposits": [
-			[{"Deposit":"` + testHashHex + `:0"},
-			 {"address":"pEbmSWqJdBuPadRGm8tDY4USQK","content":{"Value":500000000}}]
+			{"outpoint":{"Deposit":"` + testHashHex + `:0"},
+			 "output":{"address":"pEbmSWqJdBuPadRGm8tDY4USQK","content":{"Value":500000000}}}
 		],
 		"bundle_spends": [
-			[{"Regular":{"txid":"` + testHashHex + `","vout":2}}, "` + testHashHex + `"]
+			{"outpoint":{"Regular":{"txid":"` + testHashHex + `","vout":2}},
+			 "m6id":"` + testHashHex + `"}
 		]
 	}`
 
@@ -181,14 +182,23 @@ func TestBlockIndexDecodesTuplePairs(t *testing.T) {
 	if index.BundleSpends[0].OutPoint.Vout != 2 {
 		t.Errorf("bundle spend vout = %d, want 2", index.BundleSpends[0].OutPoint.Vout)
 	}
+}
 
-	// The encoder must produce the same pair form, or the test node lies.
-	raw, err := json.Marshal(index.Deposits[0])
+// A deposit names its fields. An earlier decoder read a two element array, so
+// the first block that carried a deposit failed and stalled the whole index.
+func TestADepositIsAnObjectNotAPair(t *testing.T) {
+	const pair = `[{"Deposit":"` + testHashHex + `:0"},{"address":"pEbmSWqJdBuPadRGm8tDY4USQK","content":{"Value":1}}]`
+	var d Deposit
+	if err := json.Unmarshal([]byte(pair), &d); err == nil {
+		t.Error("a pair decoded as a deposit, so the object form is not enforced")
+	}
+
+	raw, err := json.Marshal(Deposit{})
 	if err != nil {
 		t.Fatalf("encode: %v", err)
 	}
-	if raw[0] != '[' {
-		t.Errorf("encoded a deposit as %s, want a pair", raw)
+	if raw[0] != '{' {
+		t.Errorf("encoded a deposit as %s, want an object", raw)
 	}
 }
 
