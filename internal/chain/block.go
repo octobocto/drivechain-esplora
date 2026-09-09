@@ -27,17 +27,7 @@ type Input struct {
 }
 
 func (i *Input) UnmarshalJSON(data []byte) error {
-	var pair []json.RawMessage
-	if err := json.Unmarshal(data, &pair); err != nil {
-		return fmt.Errorf("decode input pair: %w", err)
-	}
-	if len(pair) != 2 {
-		return fmt.Errorf("input pair has %d elements, want 2", len(pair))
-	}
-	if err := json.Unmarshal(pair[0], &i.OutPoint); err != nil {
-		return err
-	}
-	return json.Unmarshal(pair[1], &i.LeafHash)
+	return decodePair(data, "input", &i.OutPoint, &i.LeafHash)
 }
 
 func (i Input) MarshalJSON() ([]byte, error) {
@@ -138,34 +128,19 @@ type BlockIndex struct {
 	BundleSpends []BundleSpend `json:"bundle_spends"`
 }
 
-// Deposit is one output a mainchain deposit created. The node sends a pair,
-// not an object, because it serializes a Rust tuple.
+// Deposit is one output a mainchain deposit created. The node names its
+// fields, because a tuple of ref schemas does not compose in the OpenAPI
+// document.
 type Deposit struct {
-	OutPoint OutPoint
-	Output   Output
+	OutPoint OutPoint `json:"outpoint"`
+	Output   Output   `json:"output"`
 }
 
-func (d *Deposit) UnmarshalJSON(data []byte) error {
-	return decodePair(data, "deposit", &d.OutPoint, &d.Output)
-}
-
-func (d Deposit) MarshalJSON() ([]byte, error) {
-	return json.Marshal([]any{d.OutPoint, d.Output})
-}
-
-// BundleSpend is one output a withdrawal bundle removed. It is a pair for the
-// same reason.
+// BundleSpend is one output a withdrawal bundle removed, with the bundle that
+// took it.
 type BundleSpend struct {
-	OutPoint OutPoint
-	M6id     BitcoinHash
-}
-
-func (b *BundleSpend) UnmarshalJSON(data []byte) error {
-	return decodePair(data, "bundle spend", &b.OutPoint, &b.M6id)
-}
-
-func (b BundleSpend) MarshalJSON() ([]byte, error) {
-	return json.Marshal([]any{b.OutPoint, b.M6id})
+	OutPoint OutPoint    `json:"outpoint"`
+	M6id     BitcoinHash `json:"m6id"`
 }
 
 // decodePair reads a two element JSON array into two values.
