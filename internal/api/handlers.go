@@ -594,3 +594,37 @@ func (s *Server) sidechainInfo(r *http.Request, c mainchain.Sidechain) Sidechain
 	}
 	return info
 }
+
+// drivechainBids lists the BMM bids the mainchain mempool holds. The optional
+// slot query holds the answer to one sidechain.
+func (s *Server) drivechainBids(w http.ResponseWriter, r *http.Request) {
+	if s.bids == nil {
+		writeError(w, http.StatusServiceUnavailable, "this index reads no mainchain mempool")
+		return
+	}
+	slot := -1
+	if raw := r.URL.Query().Get("slot"); raw != "" {
+		parsed, err := strconv.ParseUint(raw, 10, 8)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "the slot must be a number from 0 to 255")
+			return
+		}
+		slot = int(parsed)
+	}
+
+	bids, err := s.bids.Bids(r.Context())
+	if err != nil {
+		s.log.Warn("read the mainchain bids", "error", err)
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+
+	out := make([]mainchain.Bid, 0, len(bids))
+	for _, bid := range bids {
+		if slot >= 0 && int(bid.Slot) != slot {
+			continue
+		}
+		out = append(out, bid)
+	}
+	writeJSON(w, out)
+}

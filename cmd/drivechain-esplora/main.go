@@ -32,6 +32,8 @@ type config struct {
 	network     string
 	nodeURL     string
 	enforcerURL string
+	coreURL     string
+	coreCookie  string
 	databaseURL string
 	listen      string
 	logLevel    string
@@ -141,9 +143,22 @@ func run() error {
 		log.Info("reading the sidechain escrow", "enforcer", cfg.enforcerURL)
 	}
 
+	// bitcoind holds the mainchain mempool, where a BMM bid waits for a block
+	// to decide it. The enforcer indexes blocks, not the mempool, so the bid
+	// route reads bitcoind.
+	var bids api.BidSource
+	if cfg.coreURL != "" {
+		core, err := mainchain.NewCore(cfg.coreURL, cfg.coreCookie)
+		if err != nil {
+			return err
+		}
+		bids = core
+		log.Info("reading the mainchain bids", "bitcoind", core.URL())
+	}
+
 	server := &http.Server{
 		Addr:              listen,
-		Handler:           api.NewServer(stores, index.NewBroadcaster(nodes), enforcer, log).Handler(),
+		Handler:           api.NewServer(stores, index.NewBroadcaster(nodes), enforcer, bids, log).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
@@ -186,6 +201,10 @@ func readConfig() (config, error) {
 		"listen address, default the chain's port for the network")
 	flag.StringVar(&cfg.enforcerURL, "enforcer-url", "",
 		"bip300301 enforcer to read the sidechain escrow from; empty serves no drivechain routes")
+	flag.StringVar(&cfg.coreURL, "core-url", "",
+		"bitcoind JSON-RPC address to read BMM bids from; empty serves no bid route")
+	flag.StringVar(&cfg.coreCookie, "core-cookie", "",
+		"path to the bitcoind cookie file, when --core-url carries no password")
 	flag.StringVar(&cfg.logLevel, "log-level", "info", "debug, info, warn, or error")
 	flag.Parse()
 

@@ -39,11 +39,19 @@ type Mainchain interface {
 	Ctip(ctx context.Context, slot uint32) (mainchain.Ctip, bool, error)
 }
 
+// BidSource lists the M8 BMM bids the mainchain mempool holds. A deployment
+// with no bitcoind behind it leaves this nil, and the bid route then answers
+// that it has no source.
+type BidSource interface {
+	Bids(ctx context.Context) ([]mainchain.Bid, error)
+}
+
 // Server answers Esplora requests from the index.
 type Server struct {
 	stores      *service.Service[*store.Store]
 	broadcaster Broadcaster
 	mainchain   Mainchain
+	bids        BidSource
 	log         *slog.Logger
 }
 
@@ -53,9 +61,16 @@ func NewServer(
 	stores *service.Service[*store.Store],
 	broadcaster Broadcaster,
 	mainchain Mainchain,
+	bids BidSource,
 	log *slog.Logger,
 ) *Server {
-	return &Server{stores: stores, broadcaster: broadcaster, mainchain: mainchain, log: log}
+	return &Server{
+		stores:      stores,
+		broadcaster: broadcaster,
+		mainchain:   mainchain,
+		bids:        bids,
+		log:         log,
+	}
 }
 
 // Handler builds the router.
@@ -107,6 +122,9 @@ func (s *Server) Handler() http.Handler {
 	// what each treasury holds.
 	mux.HandleFunc("GET /drivechain/sidechains", s.drivechainSidechains)
 	mux.HandleFunc("GET /drivechain/sidechain/{slot}", s.drivechainSidechain)
+	// A BMM bid lives in the mainchain mempool until a block decides it. A
+	// wallet with no node reads its competitors here.
+	mux.HandleFunc("GET /drivechain/bids", s.drivechainBids)
 
 	mux.HandleFunc("GET /health", s.health)
 
