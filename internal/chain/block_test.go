@@ -172,6 +172,38 @@ func TestRealBlocksCarryEveryAuthorizationForm(t *testing.T) {
 	}
 }
 
+// Each chain adds fields of its own to a transaction: bitnames sends memo and
+// data and no proof, and thunder sends a proof. The index reads neither, and a
+// decode must pass them by rather than fail.
+func TestATransactionKeepsTheFieldsTheIndexReads(t *testing.T) {
+	bitnames := readBlockFile(t, "bitnames_block.json")
+	if len(bitnames.Body.Transactions) != 4 {
+		t.Fatalf("the bitnames block holds %d transactions, want 4",
+			len(bitnames.Body.Transactions))
+	}
+	registration := bitnames.Body.Transactions[1]
+	if len(registration.Inputs) != 1 || len(registration.Outputs) != 1 {
+		t.Fatalf("the registration = %+v, want one input and one output", registration)
+	}
+	if registration.Outputs[0].Address.String() != "3yGh6d2CpN4yHjRMsUDLpEN38Uiq" {
+		t.Errorf("address = %s, want the one the node sent", registration.Outputs[0].Address)
+	}
+	if string(registration.Outputs[0].Content) != `"BitName"` {
+		t.Errorf("content = %s, want the bare string the node sent",
+			registration.Outputs[0].Content)
+	}
+
+	thunder := readBlockFile(t, "thunder_block.json")
+	if len(thunder.Body.Transactions) != 1 {
+		t.Fatalf("the thunder block holds %d transactions, want 1",
+			len(thunder.Body.Transactions))
+	}
+	payment := thunder.Body.Transactions[0]
+	if len(payment.Inputs) != 1 || len(payment.Outputs) != 2 {
+		t.Errorf("the payment = %+v, want one input and two outputs", payment)
+	}
+}
+
 // The body holds one flat signature list, one per input, in transaction order.
 // A wrong split attributes a signature to the wrong sender.
 func TestAuthorizationsFor(t *testing.T) {
