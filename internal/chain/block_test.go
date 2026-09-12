@@ -2,6 +2,7 @@ package chain
 
 import (
 	"encoding/json"
+	"os"
 	"testing"
 )
 
@@ -120,6 +121,57 @@ func TestBlockReadsABodyWithNoLeafHash(t *testing.T) {
 	}
 }
 
+// readBlockFile reads a whole get_block answer that a live node gave.
+func readBlockFile(t *testing.T, name string) Block {
+	t.Helper()
+	raw, err := os.ReadFile("testdata/" + name)
+	if err != nil {
+		t.Fatalf("read %s: %v", name, err)
+	}
+	var answer struct {
+		Result Block `json:"result"`
+	}
+	if err := json.Unmarshal(raw, &answer); err != nil {
+		t.Fatalf("decode %s: %v", name, err)
+	}
+	return answer.Result
+}
+
+// Two live nodes, two renderings of one field. bitnames writes a key as bech32
+// and a signature as prefixed hex; thunder writes both as arrays of numbers.
+func TestRealBlocksCarryEveryAuthorizationForm(t *testing.T) {
+	bitnames := readBlockFile(t, "bitnames_block.json")
+	if len(bitnames.Body.Authorizations) != 2 {
+		t.Fatalf("the bitnames block holds %d authorizations, want 2",
+			len(bitnames.Body.Authorizations))
+	}
+	first := bitnames.Body.Authorizations[0]
+	const key = "bn-svk179g6xez5ud4xvhjlgugc4zu8tlt0ap2lm7qh7gh5mzr43zqua9kq4d90yn"
+	if first.VerifyingKey.Text != key {
+		t.Errorf("bitnames key = %q, want %q", first.VerifyingKey.Text, key)
+	}
+	if first.VerifyingKey.Bytes != nil {
+		t.Errorf("bitnames key holds %s as bytes, want the text alone",
+			first.VerifyingKey.Bytes)
+	}
+	if len(first.Signature.Bytes) != 64 {
+		t.Errorf("bitnames signature is %d bytes, want 64", len(first.Signature.Bytes))
+	}
+
+	thunder := readBlockFile(t, "thunder_block.json")
+	if len(thunder.Body.Authorizations) != 1 {
+		t.Fatalf("the thunder block holds %d authorizations, want 1",
+			len(thunder.Body.Authorizations))
+	}
+	only := thunder.Body.Authorizations[0]
+	if len(only.VerifyingKey.Bytes) != 32 || len(only.Signature.Bytes) != 64 {
+		t.Errorf("thunder authorization = %+v, want a 32 byte key and a 64 byte signature", only)
+	}
+	if only.VerifyingKey.Text != "" {
+		t.Errorf("thunder key holds text %q, want none", only.VerifyingKey.Text)
+	}
+}
+
 // The body holds one flat signature list, one per input, in transaction order.
 // A wrong split attributes a signature to the wrong sender.
 func TestAuthorizationsFor(t *testing.T) {
@@ -132,7 +184,7 @@ func TestAuthorizationsFor(t *testing.T) {
 		Authorizations: make([]Authorization, 6),
 	}
 	for i := range body.Authorizations {
-		body.Authorizations[i].Signature = Bytes{byte(i)}
+		body.Authorizations[i].Signature = ByteString{Bytes: Bytes{byte(i)}}
 	}
 
 	cases := []struct {
@@ -153,9 +205,9 @@ func TestAuthorizationsFor(t *testing.T) {
 			t.Fatalf("transaction %d has %d signatures, want %d", tc.txIndex, len(got), len(tc.want))
 		}
 		for i, want := range tc.want {
-			if got[i].Signature[0] != want {
+			if got[i].Signature.Bytes[0] != want {
 				t.Errorf("transaction %d signature %d = %d, want %d",
-					tc.txIndex, i, got[i].Signature[0], want)
+					tc.txIndex, i, got[i].Signature.Bytes[0], want)
 			}
 		}
 	}

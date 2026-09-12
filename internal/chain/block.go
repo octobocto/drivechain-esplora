@@ -47,8 +47,8 @@ func (i Input) MarshalJSON() ([]byte, error) {
 
 // Authorization is the ed25519 signature over one input.
 type Authorization struct {
-	VerifyingKey Bytes `json:"verifying_key"`
-	Signature    Bytes `json:"signature"`
+	VerifyingKey ByteString `json:"verifying_key"`
+	Signature    ByteString `json:"signature"`
 }
 
 // Transaction is a sidechain transaction. It has no version, no locktime, and

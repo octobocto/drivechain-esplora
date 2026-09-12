@@ -41,6 +41,48 @@ func (b *Bytes) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// ByteString holds a value a node renders as a byte string, but which some
+// chains render as text of their own. bitnames writes an ed25519 key as bech32,
+// which no hex decoder reads, so the node's own text stays beside the bytes.
+type ByteString struct {
+	// Bytes is the decoded value. It is nil when Text is not hex.
+	Bytes Bytes
+	// Text is the node's own rendering. It is empty when the node sent an
+	// array of numbers.
+	Text string
+}
+
+func (b ByteString) String() string {
+	if b.Text != "" {
+		return b.Text
+	}
+	return b.Bytes.String()
+}
+
+func (b ByteString) MarshalJSON() ([]byte, error) {
+	if b.Text != "" {
+		return json.Marshal(b.Text)
+	}
+	return json.Marshal(b.Bytes)
+}
+
+func (b *ByteString) UnmarshalJSON(data []byte) error {
+	*b = ByteString{}
+	if len(data) > 0 && data[0] != '"' {
+		return b.Bytes.UnmarshalJSON(data)
+	}
+	if err := json.Unmarshal(data, &b.Text); err != nil {
+		return fmt.Errorf("decode byte string: %w", err)
+	}
+	raw, err := decodeHex(b.Text)
+	if err != nil {
+		// Text that no hex decoder reads, such as bech32, is the whole value.
+		return nil
+	}
+	b.Bytes = raw
+	return nil
+}
+
 // decodeHex reads hex with or without a "0x" prefix.
 func decodeHex(s string) ([]byte, error) {
 	return hex.DecodeString(strings.TrimPrefix(s, "0x"))
