@@ -33,10 +33,90 @@ func TestInputAcceptsBothLeafHashForms(t *testing.T) {
 	}
 }
 
+// A chain with no utreexo, such as bitnames, sends the outpoint alone. An
+// earlier decoder read the pair form only, so every such block failed.
+func TestInputReadsAnOutPointWithNoLeafHash(t *testing.T) {
+	const wire = `{"Regular":{"txid":"` + testHashHex + `","vout":3}}`
+
+	var in Input
+	if err := json.Unmarshal([]byte(wire), &in); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if in.OutPoint.Kind != KindRegular || in.OutPoint.Vout != 3 {
+		t.Errorf("outpoint = %+v, want a regular outpoint at vout 3", in.OutPoint)
+	}
+	if in.OutPoint.Source.String() != testHashHex {
+		t.Errorf("source = %s, want %s", in.OutPoint.Source, testHashHex)
+	}
+	if len(in.LeafHash) != 0 {
+		t.Errorf("leaf hash is %d bytes, want none", len(in.LeafHash))
+	}
+}
+
+// An encode must give back the shape the node sent, so a chain with no utreexo
+// never reads a leaf hash it does not have.
+func TestInputRoundTripsBothShapes(t *testing.T) {
+	cases := map[string]string{
+		"pair":          `[{"Regular":{"txid":"` + testHashHex + `","vout":1}},"` + testHashHex + `"]`,
+		"bare outpoint": `{"Regular":{"txid":"` + testHashHex + `","vout":1}}`,
+	}
+
+	for name, wire := range cases {
+		t.Run(name, func(t *testing.T) {
+			var in Input
+			if err := json.Unmarshal([]byte(wire), &in); err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+			raw, err := json.Marshal(in)
+			if err != nil {
+				t.Fatalf("encode: %v", err)
+			}
+			if string(raw) != wire {
+				t.Errorf("round trip = %s, want %s", raw, wire)
+			}
+		})
+	}
+}
+
 func TestInputRejectsWrongPairLength(t *testing.T) {
 	var in Input
 	if err := json.Unmarshal([]byte(`[{"Regular":{"txid":"`+testHashHex+`","vout":0}}]`), &in); err == nil {
 		t.Fatal("want an error for a one-element pair, got none")
+	}
+}
+
+// A whole bitnames block: the body carries a transaction, and its input names
+// the outpoint alone. get_block failed on such a block and stalled the index.
+func TestBlockReadsABodyWithNoLeafHash(t *testing.T) {
+	const wire = `{
+		"header": {"merkle_root":"` + testHashHex + `","prev_side_hash":"` + testHashHex + `",
+			"prev_main_hash":"` + testHashHex + `"},
+		"body": {
+			"coinbase": [],
+			"transactions": [{
+				"inputs": [{"Regular":{"txid":"` + testHashHex + `","vout":0}}],
+				"outputs": [{"address":"pEbmSWqJdBuPadRGm8tDY4USQK","content":{"Value":500000000}}]
+			}],
+			"authorizations": [{"verifying_key":"0102","signature":"0304"}]
+		}
+	}`
+
+	var block Block
+	if err := json.Unmarshal([]byte(wire), &block); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(block.Body.Transactions) != 1 {
+		t.Fatalf("got %d transactions, want 1", len(block.Body.Transactions))
+	}
+	inputs := block.Body.Transactions[0].Inputs
+	if len(inputs) != 1 {
+		t.Fatalf("got %d inputs, want 1", len(inputs))
+	}
+	if inputs[0].OutPoint.Kind != KindRegular || inputs[0].OutPoint.Vout != 0 {
+		t.Errorf("outpoint = %+v, want a regular outpoint at vout 0", inputs[0].OutPoint)
+	}
+	if len(inputs[0].LeafHash) != 0 {
+		t.Errorf("leaf hash is %d bytes, want none", len(inputs[0].LeafHash))
 	}
 }
 
