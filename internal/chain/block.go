@@ -20,17 +20,28 @@ type Output struct {
 	Content json.RawMessage `json:"content"`
 }
 
-// Input names the output a transaction spends, with its utreexo leaf hash.
+// Input names the output a transaction spends, with its utreexo leaf hash. A
+// chain with no utreexo sends the outpoint alone, and leaves LeafHash empty.
 type Input struct {
 	OutPoint OutPoint
 	LeafHash Bytes
 }
 
 func (i *Input) UnmarshalJSON(data []byte) error {
-	return decodePair(data, "input", &i.OutPoint, &i.LeafHash)
+	if len(data) > 0 && data[0] == '[' {
+		return decodePair(data, "input", &i.OutPoint, &i.LeafHash)
+	}
+	i.LeafHash = nil
+	if err := json.Unmarshal(data, &i.OutPoint); err != nil {
+		return fmt.Errorf("decode input outpoint: %w", err)
+	}
+	return nil
 }
 
 func (i Input) MarshalJSON() ([]byte, error) {
+	if len(i.LeafHash) == 0 {
+		return json.Marshal(i.OutPoint)
+	}
 	return json.Marshal([]any{i.OutPoint, i.LeafHash})
 }
 
