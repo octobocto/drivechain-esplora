@@ -4,11 +4,13 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"strings"
 )
 
-// Bytes holds a byte string that a node may render either as hex or as an array
-// of numbers. ed25519 keys and signatures carry serde's own byte encoding, and
-// utreexo leaf hashes carry no hex adapter, so both forms appear on the wire.
+// Bytes holds a byte string that a node may render as hex, as hex with a "0x"
+// prefix, or as an array of numbers. ed25519 keys and signatures carry serde's
+// own byte encoding, and utreexo leaf hashes carry no hex adapter, so every
+// form appears on the wire.
 type Bytes []byte
 
 func (b Bytes) String() string { return hex.EncodeToString(b) }
@@ -24,7 +26,7 @@ func (b *Bytes) UnmarshalJSON(data []byte) error {
 		if err := json.Unmarshal(data, &s); err != nil {
 			return fmt.Errorf("decode byte string: %w", err)
 		}
-		raw, err := hex.DecodeString(s)
+		raw, err := decodeHex(s)
 		if err != nil {
 			return fmt.Errorf("decode byte string %q: %w", s, err)
 		}
@@ -37,6 +39,11 @@ func (b *Bytes) UnmarshalJSON(data []byte) error {
 	}
 	*b = numbers
 	return nil
+}
+
+// decodeHex reads hex with or without a "0x" prefix.
+func decodeHex(s string) ([]byte, error) {
+	return hex.DecodeString(strings.TrimPrefix(s, "0x"))
 }
 
 // Variant reads the one key an externally tagged serde enum writes. A variant
