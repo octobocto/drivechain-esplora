@@ -191,6 +191,44 @@ func TestApplyAndRead(t *testing.T) {
 	}
 }
 
+// A bitnames output names its content with a bare string, not with an object.
+// The content column is JSONB, which holds a bare string too.
+func TestAContentCanBeABareString(t *testing.T) {
+	ctx := context.Background()
+	st := openStore(t)
+
+	alice := addr(1)
+	txid := hash(0x21)
+
+	b := block(0, hash(0xa0), nil)
+	b.Txs = []store.Tx{{Txid: txid, Index: 0, SizeBytes: 120, Raw: []byte{1}}}
+	b.Creates = []store.Output{{
+		OutPoint:    regular(txid, 0),
+		Address:     alice,
+		ValueSats:   0,
+		Content:     json.RawMessage(`"BitNameReservation"`),
+		ContentType: "bitname_reservation",
+		HeightExact: true,
+	}}
+	if _, err := st.Apply(ctx, b); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+
+	utxos, err := st.UTXOs(ctx, store.ColumnAddress, alice[:])
+	if err != nil {
+		t.Fatalf("utxos: %v", err)
+	}
+	if len(utxos) != 1 {
+		t.Fatalf("alice holds %d utxos, want 1", len(utxos))
+	}
+	if string(utxos[0].Content) != `"BitNameReservation"` {
+		t.Errorf("content = %s, want the bare string", utxos[0].Content)
+	}
+	if utxos[0].ContentType != "bitname_reservation" || utxos[0].ValueSats != 0 {
+		t.Errorf("utxo = %+v, want a nameless coin worth nothing", utxos[0])
+	}
+}
+
 // A withdrawal bundle spends an output with no transaction at all. The index
 // must record that spend, or the coin reads as still available.
 func TestBundleSpendMarksTheOutput(t *testing.T) {
