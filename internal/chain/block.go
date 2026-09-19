@@ -3,6 +3,8 @@ package chain
 import (
 	"encoding/json"
 	"fmt"
+
+	"lukechampine.com/blake3"
 )
 
 // Header is a sidechain block header. It carries no height and no timestamp.
@@ -58,10 +60,52 @@ type Transaction struct {
 	Outputs []Output `json:"outputs"`
 }
 
+// Coinbase holds the outputs a block body creates. A node that sends a memo
+// sends an object and keys each output on the coinbase txid. An older node
+// sends a bare list and keys each output on the header merkle root.
+type Coinbase struct {
+	Memo    Bytes
+	Outputs []Output
+	// KeyedByTxid is true when the node sent the object form.
+	KeyedByTxid bool
+}
+
+type coinbaseObject struct {
+	Memo    Bytes    `json:"memo"`
+	Outputs []Output `json:"outputs"`
+}
+
+func (c *Coinbase) UnmarshalJSON(data []byte) error {
+	if len(data) > 0 && data[0] == '[' {
+		*c = Coinbase{}
+		if err := json.Unmarshal(data, &c.Outputs); err != nil {
+			return fmt.Errorf("decode coinbase outputs: %w", err)
+		}
+		return nil
+	}
+	var object coinbaseObject
+	if err := json.Unmarshal(data, &object); err != nil {
+		return fmt.Errorf("decode coinbase: %w", err)
+	}
+	*c = Coinbase{Memo: object.Memo, Outputs: object.Outputs, KeyedByTxid: true}
+	return nil
+}
+
+func (c Coinbase) MarshalJSON() ([]byte, error) {
+	outputs := c.Outputs
+	if outputs == nil {
+		outputs = []Output{}
+	}
+	if !c.KeyedByTxid {
+		return json.Marshal(outputs)
+	}
+	return json.Marshal(coinbaseObject{Memo: c.Memo, Outputs: outputs})
+}
+
 // Body holds a block's coins. Coinbase outputs belong to the body itself, not
-// to any transaction, and key on the header merkle root.
+// to any transaction.
 type Body struct {
-	Coinbase       []Output        `json:"coinbase"`
+	Coinbase       Coinbase        `json:"coinbase"`
 	Transactions   []Transaction   `json:"transactions"`
 	Authorizations []Authorization `json:"authorizations"`
 }
@@ -70,6 +114,29 @@ type Body struct {
 type Block struct {
 	Header Header `json:"header"`
 	Body   Body   `json:"body"`
+}
+
+// CoinbaseSource returns the hash each coinbase outpoint of this block names.
+func (b *Block) CoinbaseSource() Hash {
+	if b.Body.Coinbase.KeyedByTxid {
+		return CoinbaseTxid(b.Header)
+	}
+	return b.Header.MerkleRoot
+}
+
+// CoinbaseTxid is the blake3 digest over the borsh encoding of the merkle
+// root, the previous mainchain hash, and the optional previous sidechain hash.
+func CoinbaseTxid(header Header) Hash {
+	encoding := make([]byte, 0, 32+32+1+32)
+	encoding = append(encoding, header.MerkleRoot[:]...)
+	encoding = append(encoding, header.PrevMainHash[:]...)
+	if header.PrevSideHash == nil {
+		encoding = append(encoding, 0)
+	} else {
+		encoding = append(encoding, 1)
+		encoding = append(encoding, header.PrevSideHash[:]...)
+	}
+	return Hash(blake3.Sum256(encoding))
 }
 
 // AuthorizationsFor returns the signatures that cover one transaction. The body

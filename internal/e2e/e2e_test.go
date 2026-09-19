@@ -189,7 +189,7 @@ func TestChainReachesTheAPI(t *testing.T) {
 	// root rather than on any txid.
 	h.node.AddBlock(genesisHash, &chain.Block{
 		Header: chain.Header{MerkleRoot: merkle0, PrevMainHash: chain.BitcoinHash(hash(0x40))},
-		Body:   chain.Body{Coinbase: []chain.Output{{Address: alice, Content: value(50000)}}},
+		Body:   chain.Body{Coinbase: chain.Coinbase{Outputs: []chain.Output{{Address: alice, Content: value(50000)}}}},
 	}, chain.BlockIndex{})
 
 	// Block one spends alice's coin to bob, and takes a mainchain deposit.
@@ -324,7 +324,7 @@ func TestReorgRewindsTheAPI(t *testing.T) {
 
 	h.node.AddBlock(genesisHash, &chain.Block{
 		Header: chain.Header{MerkleRoot: merkle0, PrevMainHash: chain.BitcoinHash(hash(0x40))},
-		Body:   chain.Body{Coinbase: []chain.Output{{Address: alice, Content: value(50000)}}},
+		Body:   chain.Body{Coinbase: chain.Coinbase{Outputs: []chain.Output{{Address: alice, Content: value(50000)}}}},
 	}, chain.BlockIndex{})
 	h.sync(t)
 
@@ -363,7 +363,7 @@ func TestReorgRewindsTheAPI(t *testing.T) {
 			MerkleRoot: hash(0x82), PrevSideHash: &prev,
 			PrevMainHash: chain.BitcoinHash(hash(0x42)),
 		},
-		Body: chain.Body{Coinbase: []chain.Output{{Address: bob, Content: value(7000)}}},
+		Body: chain.Body{Coinbase: chain.Coinbase{Outputs: []chain.Output{{Address: bob, Content: value(7000)}}}},
 	}, chain.BlockIndex{})
 	h.sync(t)
 
@@ -463,7 +463,7 @@ func TestUnconfirmedPaymentReachesTheAPI(t *testing.T) {
 
 	h.node.AddBlock(genesisHash, &chain.Block{
 		Header: chain.Header{MerkleRoot: merkle, PrevMainHash: chain.BitcoinHash(hash(0x40))},
-		Body:   chain.Body{Coinbase: []chain.Output{{Address: alice, Content: value(50000)}}},
+		Body:   chain.Body{Coinbase: chain.Coinbase{Outputs: []chain.Output{{Address: alice, Content: value(50000)}}}},
 	}, chain.BlockIndex{})
 	h.sync(t)
 
@@ -597,7 +597,7 @@ func TestABlockTakesOverTheUnconfirmedPayment(t *testing.T) {
 
 	h.node.AddBlock(genesisHash, &chain.Block{
 		Header: chain.Header{MerkleRoot: merkle0, PrevMainHash: chain.BitcoinHash(hash(0x40))},
-		Body:   chain.Body{Coinbase: []chain.Output{{Address: alice, Content: value(50000)}}},
+		Body:   chain.Body{Coinbase: chain.Coinbase{Outputs: []chain.Output{{Address: alice, Content: value(50000)}}}},
 	}, chain.BlockIndex{})
 	h.sync(t)
 
