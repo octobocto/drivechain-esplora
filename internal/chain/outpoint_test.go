@@ -82,7 +82,7 @@ func TestOutPointJSON(t *testing.T) {
 		},
 		{
 			name: "coinbase",
-			wire: `{"Coinbase":{"merkle_root":"` + sideHex + `","vout":0}}`,
+			wire: `{"Coinbase":{"txid":"` + sideHex + `","vout":0}}`,
 			want: OutPoint{Kind: KindCoinbase, Vout: 0},
 		},
 		{

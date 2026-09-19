@@ -160,7 +160,8 @@ Each difference comes from the chain, not from a shortcut.
   payout and its mainchain fee from the sidechain, because the enforcer pays
   both out of the treasury. The index counts both.
 - **A coinbase output belongs to the block, not to a transaction.** It keys on
-  the header merkle root.
+  the coinbase txid: blake3 over the merkle root, the previous mainchain hash,
+  and the previous sidechain hash. An older node keys it on the merkle root.
 - **`version`, `locktime` and `sequence` are always 0.** These chains have no
   such fields. The API still carries them, so a client parser does not break.
 

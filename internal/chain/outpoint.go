@@ -15,7 +15,7 @@ type OutPointKind uint8
 const (
 	// KindRegular is an output of a sidechain transaction.
 	KindRegular OutPointKind = 0
-	// KindCoinbase is an output of a block body, keyed by the merkle root.
+	// KindCoinbase is an output of a block body.
 	KindCoinbase OutPointKind = 1
 	// KindDeposit is an output created by a mainchain deposit.
 	KindDeposit OutPointKind = 2
@@ -43,7 +43,8 @@ const OutPointKeySize = 37
 type OutPointKey [OutPointKeySize]byte
 
 // OutPoint names one output. Source is a sidechain txid for a regular output, a
-// block merkle root for a coinbase output, and a mainchain txid for a deposit.
+// coinbase txid or an older node's block merkle root for a coinbase output, and
+// a mainchain txid for a deposit.
 type OutPoint struct {
 	Kind   OutPointKind
 	Source Hash
@@ -88,13 +89,29 @@ type outPointWire struct {
 		Txid Hash   `json:"txid"`
 		Vout uint32 `json:"vout"`
 	} `json:"Regular,omitempty"`
-	Coinbase *struct {
-		MerkleRoot Hash   `json:"merkle_root"`
-		Vout       uint32 `json:"vout"`
-	} `json:"Coinbase,omitempty"`
+	Coinbase *coinbaseOutPointWire `json:"Coinbase,omitempty"`
 	// A deposit names a mainchain outpoint, which rust-bitcoin renders as one
 	// "txid:vout" string rather than as an object.
 	Deposit *string `json:"Deposit,omitempty"`
+}
+
+// coinbaseOutPointWire names a coinbase output by its txid. An older node
+// names it by the block merkle root.
+type coinbaseOutPointWire struct {
+	Txid       *Hash  `json:"txid,omitempty"`
+	MerkleRoot *Hash  `json:"merkle_root,omitempty"`
+	Vout       uint32 `json:"vout"`
+}
+
+func (w *coinbaseOutPointWire) source() (Hash, error) {
+	switch {
+	case w.Txid != nil:
+		return *w.Txid, nil
+	case w.MerkleRoot != nil:
+		return *w.MerkleRoot, nil
+	default:
+		return Hash{}, fmt.Errorf("coinbase outpoint names neither a txid nor a merkle root")
+	}
 }
 
 func (o *OutPoint) UnmarshalJSON(data []byte) error {
@@ -106,7 +123,11 @@ func (o *OutPoint) UnmarshalJSON(data []byte) error {
 	case wire.Regular != nil:
 		*o = OutPoint{Kind: KindRegular, Source: wire.Regular.Txid, Vout: wire.Regular.Vout}
 	case wire.Coinbase != nil:
-		*o = OutPoint{Kind: KindCoinbase, Source: wire.Coinbase.MerkleRoot, Vout: wire.Coinbase.Vout}
+		source, err := wire.Coinbase.source()
+		if err != nil {
+			return err
+		}
+		*o = OutPoint{Kind: KindCoinbase, Source: source, Vout: wire.Coinbase.Vout}
 	case wire.Deposit != nil:
 		parsed, err := parseBitcoinOutPoint(*wire.Deposit)
 		if err != nil {
@@ -128,10 +149,7 @@ func (o OutPoint) MarshalJSON() ([]byte, error) {
 			Vout uint32 `json:"vout"`
 		}{Txid: o.Source, Vout: o.Vout}
 	case KindCoinbase:
-		wire.Coinbase = &struct {
-			MerkleRoot Hash   `json:"merkle_root"`
-			Vout       uint32 `json:"vout"`
-		}{MerkleRoot: o.Source, Vout: o.Vout}
+		wire.Coinbase = &coinbaseOutPointWire{Txid: &o.Source, Vout: o.Vout}
 	case KindDeposit:
 		text := fmt.Sprintf("%s:%d", BitcoinHash(o.Source), o.Vout)
 		wire.Deposit = &text

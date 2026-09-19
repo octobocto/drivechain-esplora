@@ -46,7 +46,7 @@ func TestPrepareCoversEveryPath(t *testing.T) {
 	block := &chain.Block{
 		Header: chain.Header{MerkleRoot: merkle, PrevMainHash: chain.BitcoinHash(hash(0x22))},
 		Body: chain.Body{
-			Coinbase: []chain.Output{{Address: addr(1), Content: value(500)}},
+			Coinbase: chain.Coinbase{Outputs: []chain.Output{{Address: addr(1), Content: value(500)}}},
 			Transactions: []chain.Transaction{{
 				Inputs:  []chain.Input{{OutPoint: prevOut}},
 				Outputs: []chain.Output{{Address: addr(2), Content: value(900)}},
@@ -71,7 +71,7 @@ func TestPrepareCoversEveryPath(t *testing.T) {
 	if len(got.Creates) != 3 {
 		t.Fatalf("creates %d outputs, want 3", len(got.Creates))
 	}
-	// A coinbase output keys on the header merkle root, never on a txid.
+	// A bare coinbase list keys on the header merkle root.
 	coinbase := got.Creates[0]
 	want := chain.OutPoint{Kind: chain.KindCoinbase, Source: merkle, Vout: 0}
 	if coinbase.OutPoint != want {
@@ -113,12 +113,40 @@ func TestPrepareCoversEveryPath(t *testing.T) {
 	}
 }
 
+// A coinbase object keys each output on the coinbase txid, which is what a
+// transaction that spends it names.
+func TestPrepareKeysACoinbaseObjectOnItsTxid(t *testing.T) {
+	parent := hash(0x33)
+	block := &chain.Block{
+		Header: chain.Header{MerkleRoot: hash(0xaa), PrevSideHash: &parent, PrevMainHash: chain.BitcoinHash(hash(0x22))},
+		Body: chain.Body{Coinbase: chain.Coinbase{
+			Outputs:     []chain.Output{{Address: addr(1), Content: value(500)}, {Address: addr(2), Content: value(600)}},
+			KeyedByTxid: true,
+		}},
+	}
+
+	got, err := Prepare(5, hash(0xbb), block, chain.BlockIndex{}, thunder.Decoder{}, nil)
+	if err != nil {
+		t.Fatalf("prepare: %v", err)
+	}
+	if len(got.Creates) != 2 {
+		t.Fatalf("creates %d outputs, want 2", len(got.Creates))
+	}
+	txid := chain.CoinbaseTxid(block.Header)
+	for vout, create := range got.Creates {
+		want := chain.OutPoint{Kind: chain.KindCoinbase, Source: txid, Vout: uint32(vout)}
+		if create.OutPoint != want {
+			t.Errorf("coinbase output %d = %+v, want %+v", vout, create.OutPoint, want)
+		}
+	}
+}
+
 // A withdrawal output removes both its payout and its mainchain fee.
 func TestPrepareCountsTheWithdrawalFee(t *testing.T) {
 	raw := json.RawMessage(
 		`{"Withdrawal":{"value_sats":1000,"main_fee_sats":250,"main_address":"tb1q"}}`)
 	block := &chain.Block{
-		Body: chain.Body{Coinbase: []chain.Output{{Address: addr(1), Content: raw}}},
+		Body: chain.Body{Coinbase: chain.Coinbase{Outputs: []chain.Output{{Address: addr(1), Content: raw}}}},
 	}
 
 	got, err := Prepare(1, hash(1), block, chain.BlockIndex{}, thunder.Decoder{}, nil)

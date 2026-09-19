@@ -14,7 +14,8 @@ import (
 //
 // A block creates coins three ways and spends them two ways:
 //
-//  1. the body coinbase, which keys on the header merkle root
+//  1. the body coinbase, which keys on the coinbase txid, or on an older
+//     node's header merkle root
 //  2. a transaction output, which keys on its txid
 //  3. a mainchain deposit, which keys on a mainchain outpoint and never
 //     appears in the body
@@ -42,11 +43,12 @@ func Prepare(
 		BlockTime:  blockTime,
 	}
 
-	for i, output := range block.Body.Coinbase {
+	coinbaseSource := block.CoinbaseSource()
+	for i, output := range block.Body.Coinbase.Outputs {
 		row, err := newOutput(
 			chain.OutPoint{
 				Kind:   chain.KindCoinbase,
-				Source: block.Header.MerkleRoot,
+				Source: coinbaseSource,
 				Vout:   uint32(i),
 			},
 			output, decoder, true)
