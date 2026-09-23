@@ -31,7 +31,7 @@ func TestExplorerFeedNamesEveryKind(t *testing.T) {
 
 	h.node.AddBlock(genesisHash, &chain.Block{
 		Header: chain.Header{MerkleRoot: merkle0, PrevMainHash: chain.BitcoinHash(hash(0x40))},
-		Body:   chain.Body{Coinbase: []chain.Output{{Address: alice, Content: value(100000)}}},
+		Body:   chain.Body{Coinbase: chain.Coinbase{Outputs: []chain.Output{{Address: alice, Content: value(100000)}}}},
 	}, chain.BlockIndex{})
 
 	prev := genesisHash
@@ -129,7 +129,7 @@ func TestBlockCarriesFeesAndItsMainchainLink(t *testing.T) {
 
 	h.node.AddBlock(genesisHash, &chain.Block{
 		Header: chain.Header{MerkleRoot: merkle0, PrevMainHash: chain.BitcoinHash(hash(0x40))},
-		Body:   chain.Body{Coinbase: []chain.Output{{Address: alice, Content: value(100000)}}},
+		Body:   chain.Body{Coinbase: chain.Coinbase{Outputs: []chain.Output{{Address: alice, Content: value(100000)}}}},
 	}, chain.BlockIndex{})
 
 	prev := genesisHash
@@ -218,7 +218,7 @@ func TestBackfillFillsTheMainchainHeight(t *testing.T) {
 
 	h.node.AddBlock(genesisHash, &chain.Block{
 		Header: chain.Header{MerkleRoot: hash(0x80), PrevMainHash: mainHash},
-		Body:   chain.Body{Coinbase: []chain.Output{{Address: alice, Content: value(50000)}}},
+		Body:   chain.Body{Coinbase: chain.Coinbase{Outputs: []chain.Output{{Address: alice, Content: value(50000)}}}},
 	}, chain.BlockIndex{})
 
 	h.sync(t)
