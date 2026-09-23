@@ -421,3 +421,44 @@ func TestFeeComesFromTheIndexedCoins(t *testing.T) {
 		t.Errorf("vout = %+v, want one coin worth 9700", row.Vout)
 	}
 }
+
+// A BitName reservation carries no input, so nothing stops two blocks from
+// holding the very same transaction. The index keeps the block that carried it
+// first, and the later block writes without an error.
+func TestARepeatedTransactionDoesNotStopTheIndex(t *testing.T) {
+	ctx := context.Background()
+	st := openStore(t)
+
+	alice := addr(1)
+	txid := hash(0x31)
+	reservation := store.Tx{Txid: txid, Index: 0, SizeBytes: 71, Raw: []byte{9, 9}}
+	create := output(regular(txid, 0), alice, 0)
+
+	first := block(219, hash(0xb0), nil)
+	first.Txs = []store.Tx{reservation}
+	first.Creates = []store.Output{create}
+	if _, err := st.Apply(ctx, first); err != nil {
+		t.Fatalf("apply the first block: %v", err)
+	}
+
+	prev := first.Hash
+	again := block(221, hash(0xb2), &prev)
+	again.Txs = []store.Tx{reservation}
+	again.Creates = []store.Output{create}
+	if _, err := st.Apply(ctx, again); err != nil {
+		t.Fatalf("apply the block that repeats the transaction: %v", err)
+	}
+
+	height, _, have, err := st.Tip(ctx)
+	if err != nil || !have || height != 221 {
+		t.Fatalf("tip = %d (have %v, err %v), want height 221", height, have, err)
+	}
+
+	tx, err := st.Tx(ctx, txid)
+	if err != nil {
+		t.Fatalf("read the transaction: %v", err)
+	}
+	if tx.Height != 219 {
+		t.Errorf("transaction height = %d, want 219 — the block that carried it first", tx.Height)
+	}
+}
