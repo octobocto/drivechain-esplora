@@ -122,46 +122,88 @@ func insertBlock(ctx context.Context, tx pgx.Tx, b Block) error {
 	return nil
 }
 
+// insertTxs writes the block's transactions, and skips one the index already
+// holds. A transaction with no input — a BitName reservation is one — carries
+// no double spend, so two blocks can hold the very same one. The first block
+// that carried it keeps it.
 func insertTxs(ctx context.Context, tx pgx.Tx, b Block) error {
 	if len(b.Txs) == 0 {
 		return nil
 	}
-	rows := make([][]any, len(b.Txs))
+	txids := make([][]byte, len(b.Txs))
+	indexes := make([]int32, len(b.Txs))
+	sizes := make([]int32, len(b.Txs))
+	fees := make([]int64, len(b.Txs))
+	raws := make([][]byte, len(b.Txs))
 	for i, t := range b.Txs {
-		rows[i] = []any{t.Txid[:], int32(b.Height), int32(t.Index), int32(t.SizeBytes), t.FeeSats, t.Raw}
+		txids[i] = t.Txid[:]
+		indexes[i] = int32(t.Index)
+		sizes[i] = int32(t.SizeBytes)
+		fees[i] = t.FeeSats
+		raws[i] = t.Raw
 	}
-	_, err := tx.CopyFrom(ctx,
-		pgx.Identifier{"txs"},
-		[]string{"txid", "height", "tx_index", "size_bytes", "fee_sats", "raw"},
-		pgx.CopyFromRows(rows))
+	_, err := tx.Exec(ctx,
+		`INSERT INTO txs (txid, height, tx_index, size_bytes, fee_sats, raw)
+		 SELECT t.txid, $1, t.tx_index, t.size_bytes, t.fee_sats, t.raw
+		 FROM unnest($2::bytea[], $3::integer[], $4::integer[], $5::bigint[], $6::bytea[])
+		      AS t(txid, tx_index, size_bytes, fee_sats, raw)
+		 ON CONFLICT (txid) DO NOTHING`,
+		int32(b.Height), txids, indexes, sizes, fees, raws)
 	if err != nil {
 		return fmt.Errorf("insert transactions for block %d: %w", b.Height, err)
 	}
 	return nil
 }
 
+// insertOutputs writes the coins the block creates. A repeated transaction
+// brings its outputs again, and the first block that carried them keeps them.
 func insertOutputs(ctx context.Context, tx pgx.Tx, b Block) error {
 	if len(b.Creates) == 0 {
 		return nil
 	}
-	rows := make([][]any, len(b.Creates))
+	outpoints := make([][]byte, len(b.Creates))
+	kinds := make([]int16, len(b.Creates))
+	sources := make([][]byte, len(b.Creates))
+	vouts := make([]int32, len(b.Creates))
+	addresses := make([][]byte, len(b.Creates))
+	scripthashes := make([][]byte, len(b.Creates))
+	values := make([]int64, len(b.Creates))
+	contents := make([]string, len(b.Creates))
+	contentTypes := make([]string, len(b.Creates))
+	exact := make([]bool, len(b.Creates))
 	for i, o := range b.Creates {
 		key := o.OutPoint.Key()
 		scripthash := o.Address.ScriptHash()
-		rows[i] = []any{
-			key[:], int16(o.OutPoint.Kind), o.OutPoint.Source[:], int32(o.OutPoint.Vout),
-			b.Hash[:], o.Address[:], scripthash[:], o.ValueSats,
-			[]byte(o.Content), o.ContentType, int32(b.Height), o.HeightExact,
-		}
+		outpoints[i] = key[:]
+		kinds[i] = int16(o.OutPoint.Kind)
+		sources[i] = o.OutPoint.Source[:]
+		vouts[i] = int32(o.OutPoint.Vout)
+		addresses[i] = o.Address[:]
+		scripthashes[i] = scripthash[:]
+		values[i] = o.ValueSats
+		contents[i] = string(o.Content)
+		contentTypes[i] = o.ContentType
+		exact[i] = o.HeightExact
 	}
-	_, err := tx.CopyFrom(ctx,
-		pgx.Identifier{"outputs"},
-		[]string{
-			"outpoint", "kind", "source_id", "vout",
-			"block_hash", "address", "scripthash", "value_sats",
-			"content", "content_type", "height", "height_exact",
-		},
-		pgx.CopyFromRows(rows))
+	_, err := tx.Exec(ctx,
+		`INSERT INTO outputs (
+		     outpoint, kind, source_id, vout,
+		     block_hash, address, scripthash, value_sats,
+		     content, content_type, height, height_exact)
+		 SELECT o.outpoint, o.kind, o.source_id, o.vout,
+		        $1, o.address, o.scripthash, o.value_sats,
+		        o.content::jsonb, o.content_type, $2, o.height_exact
+		 FROM unnest($3::bytea[], $4::smallint[], $5::bytea[], $6::integer[],
+		             $7::bytea[], $8::bytea[], $9::bigint[],
+		             $10::text[], $11::text[], $12::boolean[])
+		      AS o(outpoint, kind, source_id, vout,
+		           address, scripthash, value_sats,
+		           content, content_type, height_exact)
+		 ON CONFLICT (outpoint) DO NOTHING`,
+		b.Hash[:], int32(b.Height),
+		outpoints, kinds, sources, vouts,
+		addresses, scripthashes, values,
+		contents, contentTypes, exact)
 	if err != nil {
 		return fmt.Errorf("insert outputs for block %d: %w", b.Height, err)
 	}
