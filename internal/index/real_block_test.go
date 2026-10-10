@@ -8,6 +8,7 @@ import (
 	"github.com/octobocto/drivechain-esplora/internal/chain"
 	"github.com/octobocto/drivechain-esplora/internal/chain/bitnames"
 	"github.com/octobocto/drivechain-esplora/internal/chain/thunder"
+	"github.com/octobocto/drivechain-esplora/internal/chain/truthcoin"
 )
 
 // readRealBlock reads a get_block answer a live node gave. The chain package
@@ -92,5 +93,65 @@ func TestPrepareReadsARealThunderBlock(t *testing.T) {
 	}
 	if len(got.Spends) != 1 {
 		t.Errorf("records %d spends, want 1", len(got.Spends))
+	}
+}
+
+// Betanet block 2 creates four markets. The index the node answered names the
+// real txids, so every output keys on the outpoint the node holds.
+func TestPrepareReadsARealTruthcoinBlock(t *testing.T) {
+	block := readRealBlock(t, "truthcoin_betanet_block.json")
+	raw, err := os.ReadFile("../chain/testdata/truthcoin_betanet_block_index.json")
+	if err != nil {
+		t.Fatalf("read block index: %v", err)
+	}
+	var answer struct {
+		Result chain.BlockIndex `json:"result"`
+	}
+	if err := json.Unmarshal(raw, &answer); err != nil {
+		t.Fatalf("decode block index: %v", err)
+	}
+
+	got, err := Prepare(2, hash(0xd2), block, answer.Result, truthcoin.Decoder{}, nil)
+	if err != nil {
+		t.Fatalf("prepare: %v", err)
+	}
+
+	if len(got.Txs) != 4 {
+		t.Fatalf("writes %d transactions, want 4", len(got.Txs))
+	}
+	if len(got.Creates) != 9 {
+		t.Fatalf("creates %d outputs, want 9", len(got.Creates))
+	}
+	// The coinbase claims the four fees of 4504 sats.
+	coinbase := got.Creates[0]
+	if coinbase.OutPoint.Kind != chain.KindCoinbase || coinbase.ValueSats != 4*4504 {
+		t.Errorf("coinbase = %s with %d sats, want a coinbase of %d sats",
+			coinbase.OutPoint, coinbase.ValueSats, 4*4504)
+	}
+	for i, create := range got.Creates[1:] {
+		wantType := "value"
+		if i%2 == 0 {
+			wantType = "market_treasury"
+			if create.ValueSats != 1000000 {
+				t.Errorf("output %d holds %d sats, want 1000000", i, create.ValueSats)
+			}
+		}
+		if create.ContentType != wantType {
+			t.Errorf("output %d content type = %q, want %q", i, create.ContentType, wantType)
+		}
+		want := chain.OutPoint{Kind: chain.KindRegular, Source: got.Txs[i/2].Txid, Vout: uint32(i % 2)}
+		if create.OutPoint != want {
+			t.Errorf("output %d outpoint = %s, want %s", i, create.OutPoint, want)
+		}
+	}
+	if len(got.Spends) != 5 {
+		t.Fatalf("records %d spends, want 5", len(got.Spends))
+	}
+	// Each market creation after the first spends the change of the one before.
+	for i := 1; i < 4; i++ {
+		want := chain.OutPoint{Kind: chain.KindRegular, Source: got.Txs[i-1].Txid, Vout: 1}
+		if got.Spends[i+1].OutPoint != want {
+			t.Errorf("transaction %d spends %s, want %s", i, got.Spends[i+1].OutPoint, want)
+		}
 	}
 }

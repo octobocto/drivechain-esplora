@@ -3,6 +3,7 @@ package chain
 import (
 	"encoding/hex"
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -167,5 +168,92 @@ func TestDepositOutPointRejectsBadText(t *testing.T) {
 		if err := json.Unmarshal([]byte(wire), &out); err == nil {
 			t.Errorf("want an error for %s, got none", wire)
 		}
+	}
+}
+
+// Truthcoin keys a market funds outpoint on its short borsh encoding padded
+// with zeros, and a payout on the same layout as a regular outpoint. The
+// vectors are the ones truthcoin-dc's check_outpoint_key_size test uses.
+func TestTruthcoinOutPointKeyLayout(t *testing.T) {
+	payoutHash := mustHash(t, testHashHex)
+
+	cases := []struct {
+		name string
+		out  OutPoint
+		want string
+	}{
+		{
+			name: "market funds",
+			out:  MarketFundsOutPoint([6]byte{0xab, 0xab, 0xab, 0xab, 0xab, 0xab}, 42, true),
+			want: "03" + "abababababab" + "2a000000" + "01" + strings.Repeat("00", 25),
+		},
+		{
+			name: "payout",
+			out:  OutPoint{Kind: KindPayout, Source: payoutHash, Vout: 0xffffffff},
+			want: "04" + testHashHex + "ffffffff",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			key := tc.out.Key()
+			if got := hex.EncodeToString(key[:]); got != tc.want {
+				t.Errorf("key = %s, want %s", got, tc.want)
+			}
+			back, err := OutPointFromKey(key)
+			if err != nil {
+				t.Fatalf("read key back: %v", err)
+			}
+			if back != tc.out {
+				t.Errorf("round trip = %+v, want %+v", back, tc.out)
+			}
+		})
+	}
+}
+
+// A truthcoin input can spend a payout that a market trade created. An earlier
+// decoder knew three outpoint kinds only, so such a block stopped the index.
+func TestTruthcoinOutPointJSON(t *testing.T) {
+	cases := []struct {
+		name string
+		wire string
+		want OutPoint
+	}{
+		{
+			name: "market funds",
+			wire: `{"MarketFunds":{"market_id":[97,94,213,19,245,102],"block_height":7,"is_fee":false}}`,
+			want: MarketFundsOutPoint([6]byte{97, 94, 213, 19, 245, 102}, 7, false),
+		},
+		{
+			name: "payout",
+			wire: `{"Payout":{"hash":"` + testHashHex + `","vout":0}}`,
+			want: OutPoint{Kind: KindPayout, Source: mustHash(t, testHashHex)},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var got OutPoint
+			if err := json.Unmarshal([]byte(tc.wire), &got); err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+			if got != tc.want {
+				t.Fatalf("decode = %+v, want %+v", got, tc.want)
+			}
+			out, err := json.Marshal(got)
+			if err != nil {
+				t.Fatalf("encode: %v", err)
+			}
+			if string(out) != tc.wire {
+				t.Errorf("encode = %s, want %s", out, tc.wire)
+			}
+		})
+	}
+}
+
+func TestMarketFundsOutPointString(t *testing.T) {
+	out := MarketFundsOutPoint([6]byte{1, 2, 3, 4, 5, 6}, 9, true)
+	if got, want := out.String(), "market_funds 010203040506 9 fee=true"; got != want {
+		t.Errorf("String = %q, want %q", got, want)
 	}
 }

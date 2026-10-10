@@ -40,6 +40,34 @@ func TestPorts(t *testing.T) {
 	}
 }
 
+// Truthcoin takes slot 13, so its ports follow the same rule as every chain.
+func TestTruthcoinPorts(t *testing.T) {
+	truthcoin, ok := specs["truthcoin"]
+	if !ok {
+		t.Fatal("truthcoin is missing from the registry")
+	}
+	if truthcoin.Slot != 13 {
+		t.Errorf("slot = %d, want 13", truthcoin.Slot)
+	}
+	for network, want := range map[Network][2]int{
+		Signet:  {6013, 3013},
+		Regtest: {16013, 13013},
+		Mainnet: {26013, 23013},
+	} {
+		node, err := truthcoin.NodeRPCPort(network)
+		if err != nil {
+			t.Fatalf("%s node port: %v", network, err)
+		}
+		api, err := truthcoin.APIPort(network)
+		if err != nil {
+			t.Fatalf("%s api port: %v", network, err)
+		}
+		if node != want[0] || api != want[1] {
+			t.Errorf("%s ports = %d, %d, want %d, %d", network, node, api, want[0], want[1])
+		}
+	}
+}
+
 func TestUnknownNetwork(t *testing.T) {
 	if _, err := ParseNetwork("testnet"); err == nil {
 		t.Fatal("want an error for an unknown network, got none")
