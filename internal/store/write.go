@@ -26,7 +26,8 @@ type Output struct {
 // Spend records how one output left the UTXO set.
 type Spend struct {
 	OutPoint chain.OutPoint
-	// Source is the spending txid, or the bundle m6id for a peg-out.
+	// Source is the spending txid, the bundle m6id for a peg-out, or the block
+	// hash for a removal by market code.
 	Source chain.Hash
 	Kind   chain.InPointKind
 	// Vin is the input position. A bundle spend has no transaction, so it

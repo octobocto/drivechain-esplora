@@ -2,10 +2,13 @@ package index
 
 import (
 	"encoding/json"
+	"os"
 	"testing"
 
 	"github.com/octobocto/drivechain-esplora/internal/chain"
 	"github.com/octobocto/drivechain-esplora/internal/chain/thunder"
+	"github.com/octobocto/drivechain-esplora/internal/chain/truthcoin"
+	"github.com/octobocto/drivechain-esplora/internal/store"
 )
 
 func hash(b byte) chain.Hash {
@@ -194,5 +197,90 @@ func TestPrepareRejectsANonDepositInTheDepositList(t *testing.T) {
 	}
 	if _, err := Prepare(1, hash(2), &chain.Block{}, blockIndex, thunder.Decoder{}, nil); err == nil {
 		t.Fatal("want an error for a regular outpoint in the deposit list, got none")
+	}
+}
+
+// Truthcoin market code creates and removes outputs with no transaction, and a
+// trade that failed its price limit stays in the body with no effect. The
+// fixture holds the shape the node's get_block_index answers.
+func TestPrepareAppliesTruthcoinMarketEntries(t *testing.T) {
+	raw, err := os.ReadFile("../chain/testdata/truthcoin_market_block_index.json")
+	if err != nil {
+		t.Fatalf("read block index: %v", err)
+	}
+	var answer struct {
+		Result chain.BlockIndex `json:"result"`
+	}
+	if err := json.Unmarshal(raw, &answer); err != nil {
+		t.Fatalf("decode block index: %v", err)
+	}
+	blockIndex := answer.Result
+
+	trade := chain.Transaction{
+		Inputs:  []chain.Input{{OutPoint: chain.OutPoint{Kind: chain.KindRegular, Source: hash(0x51), Vout: 0}}},
+		Outputs: []chain.Output{{Address: addr(5), Content: value(800)}},
+	}
+	skipped := chain.Transaction{
+		Inputs:  []chain.Input{{OutPoint: chain.OutPoint{Kind: chain.KindRegular, Source: hash(0x52), Vout: 0}}},
+		Outputs: []chain.Output{{Address: addr(6), Content: value(900)}},
+	}
+	block := &chain.Block{
+		Header: chain.Header{MerkleRoot: hash(0xaa), PrevMainHash: chain.BitcoinHash(hash(0x22))},
+		Body:   chain.Body{Transactions: []chain.Transaction{trade, skipped}},
+	}
+	blockHash := hash(0xbb)
+
+	got, err := Prepare(5, blockHash, block, blockIndex, truthcoin.Decoder{}, nil)
+	if err != nil {
+		t.Fatalf("prepare: %v", err)
+	}
+
+	if len(got.Txs) != 2 {
+		t.Fatalf("writes %d transactions, want both", len(got.Txs))
+	}
+
+	type create struct {
+		kind        chain.OutPointKind
+		sats        int64
+		contentType string
+	}
+	wantCreates := []create{
+		{chain.KindRegular, 800, "value"},
+		{chain.KindPayout, 3000, "value"},
+		{chain.KindMarketFunds, 996970, "market_treasury"},
+		{chain.KindMarketFunds, 30, "market_author_fee"},
+	}
+	if len(got.Creates) != len(wantCreates) {
+		t.Fatalf("creates %d outputs, want %d: %+v", len(got.Creates), len(wantCreates), got.Creates)
+	}
+	for i, want := range wantCreates {
+		c := got.Creates[i]
+		if c.OutPoint.Kind != want.kind || c.ValueSats != want.sats || c.ContentType != want.contentType {
+			t.Errorf("create %d = %s %d sats %q, want %s %d sats %q",
+				i, c.OutPoint, c.ValueSats, c.ContentType, want.kind, want.sats, want.contentType)
+		}
+	}
+	if got.Creates[1].OutPoint != blockIndex.MarketCreates[0].OutPoint {
+		t.Errorf("payout outpoint = %s, want %s", got.Creates[1].OutPoint, blockIndex.MarketCreates[0].OutPoint)
+	}
+
+	wantSpends := []store.Spend{
+		{OutPoint: trade.Inputs[0].OutPoint, Source: blockIndex.Txs[0].Txid, Kind: chain.SpendRegular, Vin: 0},
+		{OutPoint: blockIndex.MarketDeletes[0].OutPoint, Source: blockHash, Kind: chain.SpendMarket, Vin: 0},
+		{OutPoint: blockIndex.MarketDeletes[1].OutPoint, Source: blockHash, Kind: chain.SpendMarket, Vin: 1},
+	}
+	if len(got.Spends) != len(wantSpends) {
+		t.Fatalf("records %d spends, want %d: %+v", len(got.Spends), len(wantSpends), got.Spends)
+	}
+	for i, want := range wantSpends {
+		if got.Spends[i] != want {
+			t.Errorf("spend %d = %+v, want %+v", i, got.Spends[i], want)
+		}
+	}
+	// Settlement removes the treasury this block created, so the index needs
+	// both rows in one write.
+	if got.Spends[2].OutPoint != got.Creates[2].OutPoint {
+		t.Errorf("the second delete names %s, want the treasury the block created, %s",
+			got.Spends[2].OutPoint, got.Creates[2].OutPoint)
 	}
 }

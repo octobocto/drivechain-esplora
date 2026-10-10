@@ -243,6 +243,10 @@ const (
 	// SpendWithdrawal is a spend by a withdrawal bundle, which has no
 	// sidechain transaction at all.
 	SpendWithdrawal InPointKind = 1
+	// SpendMarket is a removal by truthcoin market code, which has no
+	// transaction. The node has no inpoint for it, so this value is the
+	// index's own.
+	SpendMarket InPointKind = 2
 )
 
 func (k InPointKind) String() string {
@@ -251,6 +255,8 @@ func (k InPointKind) String() string {
 		return "regular"
 	case SpendWithdrawal:
 		return "withdrawal"
+	case SpendMarket:
+		return "market"
 	default:
 		return fmt.Sprintf("unknown(%d)", uint8(k))
 	}

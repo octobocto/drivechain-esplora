@@ -12,15 +12,20 @@ import (
 // touches nothing outside its arguments, so a test needs no node and no
 // database.
 //
-// A block creates coins three ways and spends them two ways:
+// A block creates coins four ways and spends them three ways:
 //
 //  1. the body coinbase, which keys on the coinbase txid, or on an older
 //     node's header merkle root
 //  2. a transaction output, which keys on its txid
 //  3. a mainchain deposit, which keys on a mainchain outpoint and never
 //     appears in the body
-//  4. a transaction input, which spends by txid
-//  5. a withdrawal bundle, which spends with no transaction at all
+//  4. a truthcoin market create, which never appears in the body
+//  5. a transaction input, which spends by txid
+//  6. a withdrawal bundle, which spends with no transaction at all
+//  7. a truthcoin market delete, which spends with no transaction at all
+//
+// A truthcoin trade that failed its price limit stays in the body, but it
+// spends and creates nothing.
 func Prepare(
 	height uint32,
 	hash chain.Hash,
@@ -66,6 +71,9 @@ func Prepare(
 			SizeBytes: int(info.Size),
 			Raw:       info.Raw,
 		})
+		if info.Skipped {
+			continue
+		}
 
 		rows, err := prepareTx(info.Txid, tx, decoder)
 		if err != nil {
@@ -93,6 +101,24 @@ func Prepare(
 			OutPoint: spend.OutPoint,
 			Source:   chain.Hash(spend.M6id),
 			Kind:     chain.SpendWithdrawal,
+			Vin:      uint32(vin),
+		})
+	}
+
+	for _, create := range blockIndex.MarketCreates {
+		row, err := newOutput(create.OutPoint, create.Output, decoder, true)
+		if err != nil {
+			return store.Block{}, fmt.Errorf(
+				"block %s market create %s (%s): %w", hash, create.OutPoint, create.Reason, err)
+		}
+		out.Creates = append(out.Creates, row)
+	}
+
+	for vin, del := range blockIndex.MarketDeletes {
+		out.Spends = append(out.Spends, store.Spend{
+			OutPoint: del.OutPoint,
+			Source:   hash,
+			Kind:     chain.SpendMarket,
 			Vin:      uint32(vin),
 		})
 	}

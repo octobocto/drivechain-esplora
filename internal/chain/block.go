@@ -184,6 +184,9 @@ type TxInfo struct {
 	Size uint64 `json:"size"`
 	// Raw is the borsh encoding. It is what /tx/{txid}/hex serves.
 	Raw Bytes `json:"raw"`
+	// Skipped marks a truthcoin trade that failed its price limit. The block
+	// keeps it in the body, but it spends no input and creates no output.
+	Skipped bool `json:"skipped"`
 }
 
 // MempoolTx is one entry of list_mempool. It carries the whole transaction
@@ -194,9 +197,9 @@ type MempoolTx struct {
 }
 
 // BlockIndex carries everything a block body does not. A transaction has no
-// txid and no size, a deposit never appears in the body at all, and a
-// withdrawal bundle spends outputs with no transaction. One call returns all
-// three.
+// txid and no size, a deposit never appears in the body at all, a withdrawal
+// bundle spends outputs with no transaction, and truthcoin market code creates
+// and removes outputs with no transaction. One call returns all of them.
 type BlockIndex struct {
 	// Txs names each transaction in the body, in body order.
 	Txs []TxInfo `json:"txs"`
@@ -204,6 +207,13 @@ type BlockIndex struct {
 	Deposits []Deposit `json:"deposits"`
 	// BundleSpends are the outputs a withdrawal bundle removed in this block.
 	BundleSpends []BundleSpend `json:"bundle_spends"`
+	// MarketCreates are the outputs that truthcoin trades and settlement
+	// created in this block outside any transaction.
+	MarketCreates []MarketUtxo `json:"market_creates"`
+	// MarketDeletes are the outputs that truthcoin trades and settlement
+	// removed in this block outside any transaction. Settlement can remove a
+	// treasury that the same block created, so they apply after the creates.
+	MarketDeletes []MarketUtxo `json:"market_deletes"`
 }
 
 // Deposit is one output a mainchain deposit created. The node names its
@@ -219,6 +229,14 @@ type Deposit struct {
 type BundleSpend struct {
 	OutPoint OutPoint    `json:"outpoint"`
 	M6id     BitcoinHash `json:"m6id"`
+}
+
+// MarketUtxo is one output that truthcoin market code created or removed.
+// Reason names what it holds, such as "SellPayout" or "Treasury".
+type MarketUtxo struct {
+	OutPoint OutPoint `json:"outpoint"`
+	Output   Output   `json:"output"`
+	Reason   string   `json:"reason"`
 }
 
 // decodePair reads a two element JSON array into two values.
