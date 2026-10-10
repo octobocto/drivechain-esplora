@@ -9,6 +9,7 @@ import (
 	"github.com/octobocto/drivechain-esplora/internal/chain/coinshift"
 	"github.com/octobocto/drivechain-esplora/internal/chain/photon"
 	"github.com/octobocto/drivechain-esplora/internal/chain/thunder"
+	"github.com/octobocto/drivechain-esplora/internal/chain/truthcoin"
 )
 
 func init() {
@@ -17,4 +18,5 @@ func init() {
 	chain.Register(bitnames.Decoder{})
 	chain.Register(coinshift.Decoder{})
 	chain.Register(photon.Decoder{})
+	chain.Register(truthcoin.Decoder{})
 }

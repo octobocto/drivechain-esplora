@@ -8,8 +8,8 @@ import (
 	"strings"
 )
 
-// OutPointKind tags which of the three ways an output came into being. The
-// values are the borsh enum discriminants, so they also index the key bytes.
+// OutPointKind tags how an output came into being. The values are the borsh
+// enum discriminants, so they also index the key bytes.
 type OutPointKind uint8
 
 const (
@@ -19,6 +19,11 @@ const (
 	KindCoinbase OutPointKind = 1
 	// KindDeposit is an output created by a mainchain deposit.
 	KindDeposit OutPointKind = 2
+	// KindMarketFunds is a truthcoin market treasury or author fee output.
+	KindMarketFunds OutPointKind = 3
+	// KindPayout is a truthcoin output that a market trade or settlement
+	// created.
+	KindPayout OutPointKind = 4
 )
 
 func (k OutPointKind) String() string {
@@ -29,6 +34,10 @@ func (k OutPointKind) String() string {
 		return "coinbase"
 	case KindDeposit:
 		return "deposit"
+	case KindMarketFunds:
+		return "market_funds"
+	case KindPayout:
+		return "payout"
 	default:
 		return fmt.Sprintf("unknown(%d)", uint8(k))
 	}
@@ -43,8 +52,9 @@ const OutPointKeySize = 37
 type OutPointKey [OutPointKeySize]byte
 
 // OutPoint names one output. Source is a sidechain txid for a regular output, a
-// coinbase txid or an older node's block merkle root for a coinbase output, and
-// a mainchain txid for a deposit.
+// coinbase txid or an older node's block merkle root for a coinbase output, a
+// mainchain txid for a deposit, and the payout hash for a payout. A market funds
+// outpoint packs its fields into Source; see MarketFundsOutPoint.
 type OutPoint struct {
 	Kind   OutPointKind
 	Source Hash
@@ -63,7 +73,7 @@ func (o OutPoint) Key() OutPointKey {
 // OutPointFromKey reverses Key.
 func OutPointFromKey(key OutPointKey) (OutPoint, error) {
 	kind := OutPointKind(key[0])
-	if kind > KindDeposit {
+	if kind > KindPayout {
 		return OutPoint{}, fmt.Errorf("outpoint key has unknown kind %d", key[0])
 	}
 	out := OutPoint{Kind: kind, Vout: binary.LittleEndian.Uint32(key[33:])}
@@ -71,7 +81,30 @@ func OutPointFromKey(key OutPointKey) (OutPoint, error) {
 	return out, nil
 }
 
+// MarketFundsOutPoint builds a truthcoin market funds outpoint. The node keys
+// it on its borsh encoding padded with zeros, so Source holds the market id,
+// the little-endian block height and the fee flag, and Vout stays zero.
+func MarketFundsOutPoint(marketID [6]byte, blockHeight uint32, isFee bool) OutPoint {
+	out := OutPoint{Kind: KindMarketFunds}
+	copy(out.Source[:6], marketID[:])
+	binary.LittleEndian.PutUint32(out.Source[6:10], blockHeight)
+	if isFee {
+		out.Source[10] = 1
+	}
+	return out
+}
+
+// MarketFunds reads the fields MarketFundsOutPoint packed.
+func (o OutPoint) MarketFunds() (marketID [6]byte, blockHeight uint32, isFee bool) {
+	copy(marketID[:], o.Source[:6])
+	return marketID, binary.LittleEndian.Uint32(o.Source[6:10]), o.Source[10] == 1
+}
+
 func (o OutPoint) String() string {
+	if o.Kind == KindMarketFunds {
+		marketID, height, isFee := o.MarketFunds()
+		return fmt.Sprintf("%s %x %d fee=%t", o.Kind, marketID, height, isFee)
+	}
 	return fmt.Sprintf("%s %s %d", o.Kind, o.sourceString(), o.Vout)
 }
 
@@ -92,7 +125,20 @@ type outPointWire struct {
 	Coinbase *coinbaseOutPointWire `json:"Coinbase,omitempty"`
 	// A deposit names a mainchain outpoint, which rust-bitcoin renders as one
 	// "txid:vout" string rather than as an object.
-	Deposit *string `json:"Deposit,omitempty"`
+	Deposit     *string                  `json:"Deposit,omitempty"`
+	MarketFunds *marketFundsOutPointWire `json:"MarketFunds,omitempty"`
+	Payout      *payoutOutPointWire      `json:"Payout,omitempty"`
+}
+
+type payoutOutPointWire struct {
+	Hash Hash   `json:"hash"`
+	Vout uint32 `json:"vout"`
+}
+
+type marketFundsOutPointWire struct {
+	MarketID    [6]byte `json:"market_id"`
+	BlockHeight uint32  `json:"block_height"`
+	IsFee       bool    `json:"is_fee"`
 }
 
 // coinbaseOutPointWire names a coinbase output by its txid. An older node
@@ -134,6 +180,11 @@ func (o *OutPoint) UnmarshalJSON(data []byte) error {
 			return err
 		}
 		*o = parsed
+	case wire.MarketFunds != nil:
+		*o = MarketFundsOutPoint(
+			wire.MarketFunds.MarketID, wire.MarketFunds.BlockHeight, wire.MarketFunds.IsFee)
+	case wire.Payout != nil:
+		*o = OutPoint{Kind: KindPayout, Source: wire.Payout.Hash, Vout: wire.Payout.Vout}
 	default:
 		return fmt.Errorf("outpoint %s names no known variant", data)
 	}
@@ -153,6 +204,13 @@ func (o OutPoint) MarshalJSON() ([]byte, error) {
 	case KindDeposit:
 		text := fmt.Sprintf("%s:%d", BitcoinHash(o.Source), o.Vout)
 		wire.Deposit = &text
+	case KindMarketFunds:
+		marketID, height, isFee := o.MarketFunds()
+		wire.MarketFunds = &marketFundsOutPointWire{
+			MarketID: marketID, BlockHeight: height, IsFee: isFee,
+		}
+	case KindPayout:
+		wire.Payout = &payoutOutPointWire{Hash: o.Source, Vout: o.Vout}
 	default:
 		return nil, fmt.Errorf("cannot encode outpoint of kind %d", uint8(o.Kind))
 	}

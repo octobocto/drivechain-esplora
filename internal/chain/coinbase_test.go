@@ -126,3 +126,18 @@ func TestACoinbaseOutPointNeedsASource(t *testing.T) {
 		t.Fatal("want an error for a coinbase outpoint with no source, got none")
 	}
 }
+
+// Truthcoin keys a coinbase output on the same txid as thunder. The first
+// transaction of betanet block 2 spends the genesis coinbase by that txid.
+func TestTruthcoinSpendsTheGenesisCoinbaseByTxid(t *testing.T) {
+	genesis := Header{
+		MerkleRoot:   mustHash(t, "984824aaa2883a8365cfa40df4b07b0f2caf2148256367a5e6147e331c575b1b"),
+		PrevMainHash: mustBitcoinHash(t, "0000000000000000cc7325c7048d6e0cb6eb87c35e8032917cddf70dd992b832"),
+	}
+	block := readBlockFile(t, "truthcoin_betanet_block.json")
+	spend := block.Body.Transactions[0].Inputs[0].OutPoint
+	want := OutPoint{Kind: KindCoinbase, Source: CoinbaseTxid(genesis), Vout: 0}
+	if spend != want {
+		t.Errorf("first input = %s, want %s", spend, want)
+	}
+}
