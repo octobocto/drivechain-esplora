@@ -270,6 +270,67 @@ func TestBundleSpendMarksTheOutput(t *testing.T) {
 	}
 }
 
+// Truthcoin market code creates and removes outputs with no transaction, and
+// settlement can remove a treasury that the same block created. One write must
+// apply the creates before the removals, or that treasury reads as unspent.
+func TestMarketDeleteMarksTheOutput(t *testing.T) {
+	ctx := context.Background()
+	st := openStore(t)
+
+	treasury, seller := addr(9), addr(1)
+	txid := hash(0x11)
+
+	first := block(0, hash(0xa0), nil)
+	first.Txs = []store.Tx{{Txid: txid, Raw: []byte{1}}}
+	first.Creates = []store.Output{output(regular(txid, 0), treasury, 1_000_000)}
+	if _, err := st.Apply(ctx, first); err != nil {
+		t.Fatalf("apply first: %v", err)
+	}
+
+	prev := first.Hash
+	second := block(1, hash(0xa1), &prev)
+	payout := chain.OutPoint{Kind: chain.KindPayout, Source: hash(0x33)}
+	newTreasury := chain.MarketFundsOutPoint([6]byte{1, 2, 3, 4, 5, 6}, 1, false)
+	second.Creates = []store.Output{
+		output(payout, seller, 3000),
+		output(newTreasury, treasury, 997_000),
+	}
+	second.Spends = []store.Spend{
+		{OutPoint: regular(txid, 0), Source: second.Hash, Kind: chain.SpendMarket, Vin: 0},
+		{OutPoint: newTreasury, Source: second.Hash, Kind: chain.SpendMarket, Vin: 1},
+	}
+	result, err := st.Apply(ctx, second)
+	if err != nil {
+		t.Fatalf("apply second: %v", err)
+	}
+	if result.UnknownSpends != 0 {
+		t.Errorf("reported %d unknown spends, want 0", result.UnknownSpends)
+	}
+
+	utxos, err := st.UTXOs(ctx, store.ColumnAddress, treasury[:])
+	if err != nil {
+		t.Fatalf("treasury utxos: %v", err)
+	}
+	if len(utxos) != 0 {
+		t.Errorf("the treasury still holds %d utxos after market code removed them", len(utxos))
+	}
+	utxos, err = st.UTXOs(ctx, store.ColumnAddress, seller[:])
+	if err != nil {
+		t.Fatalf("seller utxos: %v", err)
+	}
+	if len(utxos) != 1 || utxos[0].ValueSats != 3000 {
+		t.Errorf("seller utxos = %+v, want the payout of 3000 sats", utxos)
+	}
+
+	coins, err := st.Outspends(ctx, txid)
+	if err != nil {
+		t.Fatalf("outspends: %v", err)
+	}
+	if len(coins) != 1 || coins[0].SpentKind == nil || *coins[0].SpentKind != chain.SpendMarket {
+		t.Errorf("old treasury = %+v, want a removal by market code", coins)
+	}
+}
+
 // A spend of an output the index never saw is reported, never silently applied.
 func TestUnknownSpendIsReported(t *testing.T) {
 	ctx := context.Background()

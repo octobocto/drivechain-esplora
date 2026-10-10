@@ -110,8 +110,9 @@ type Outspend struct {
 	Txid   *string `json:"txid"`
 	Vin    *uint32 `json:"vin"`
 	Status *Status `json:"status"`
-	// SpentBy reads "transaction" or "withdrawal_bundle". A bundle spends an
-	// output with no transaction at all, and Txid then names the bundle.
+	// SpentBy reads "transaction", "withdrawal_bundle" or "market". A bundle
+	// spends an output with no transaction at all, and Txid then names the
+	// bundle. A removal by truthcoin market code leaves Txid empty.
 	SpentBy string `json:"spent_by,omitempty"`
 }
 

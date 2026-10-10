@@ -286,7 +286,8 @@ func (s *Server) outspend(w http.ResponseWriter, r *http.Request) {
 }
 
 // newOutspend reports what took one coin. A withdrawal bundle spends with no
-// transaction, so Txid then names the bundle rather than a transaction.
+// transaction, so Txid then names the bundle rather than a transaction. A
+// removal by truthcoin market code has neither, so Txid stays empty.
 func (s *Server) newOutspend(r *http.Request, st *store.Store, coin store.Coin) (Outspend, error) {
 	if coin.SpentSource == nil {
 		return Outspend{Spent: false}, nil
@@ -296,6 +297,8 @@ func (s *Server) newOutspend(r *http.Request, st *store.Store, coin store.Coin) 
 		out.SpentBy = "withdrawal_bundle"
 		id := chain.BitcoinHash(*coin.SpentSource).String()
 		out.Txid = &id
+	} else if coin.SpentKind != nil && *coin.SpentKind == chain.SpendMarket {
+		out.SpentBy = "market"
 	} else {
 		id := coin.SpentSource.String()
 		out.Txid = &id

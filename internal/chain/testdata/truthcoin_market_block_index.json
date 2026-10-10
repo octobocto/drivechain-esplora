@@ -1,0 +1,41 @@
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": {
+    "txs": [
+      {"txid": "1111111111111111111111111111111111111111111111111111111111111111", "size": 210, "raw": "01", "skipped": false},
+      {"txid": "2222222222222222222222222222222222222222222222222222222222222222", "size": 210, "raw": "02", "skipped": true}
+    ],
+    "deposits": [],
+    "bundle_spends": [],
+    "market_creates": [
+      {
+        "outpoint": {"Payout": {"hash": "3333333333333333333333333333333333333333333333333333333333333333", "vout": 0}},
+        "output": {"address": "eXjcata265ExUrn76ygBb2uJVH1", "content": {"Value": 3000}},
+        "reason": "SellPayout"
+      },
+      {
+        "outpoint": {"MarketFunds": {"market_id": [97,94,213,19,245,102], "block_height": 5, "is_fee": false}},
+        "output": {"address": "iJDqTH7LNk1t3U94sRwo1jSCp28", "content": {"MarketFunds": {"market_id": [97,94,213,19,245,102], "amount": 996970, "is_fee": false}}},
+        "reason": "Treasury"
+      },
+      {
+        "outpoint": {"MarketFunds": {"market_id": [97,94,213,19,245,102], "block_height": 5, "is_fee": true}},
+        "output": {"address": "iJDqTH7LNk1t3U94sRwo1jSCp28", "content": {"MarketFunds": {"market_id": [97,94,213,19,245,102], "amount": 30, "is_fee": true}}},
+        "reason": "AuthorFee"
+      }
+    ],
+    "market_deletes": [
+      {
+        "outpoint": {"Regular": {"txid": "4444444444444444444444444444444444444444444444444444444444444444", "vout": 0}},
+        "output": {"address": "iJDqTH7LNk1t3U94sRwo1jSCp28", "content": {"MarketFunds": {"market_id": [97,94,213,19,245,102], "amount": 1000000, "is_fee": false}}},
+        "reason": "Treasury"
+      },
+      {
+        "outpoint": {"MarketFunds": {"market_id": [97,94,213,19,245,102], "block_height": 5, "is_fee": false}},
+        "output": {"address": "iJDqTH7LNk1t3U94sRwo1jSCp28", "content": {"MarketFunds": {"market_id": [97,94,213,19,245,102], "amount": 996970, "is_fee": false}}},
+        "reason": "Treasury"
+      }
+    ]
+  }
+}
