@@ -7,7 +7,7 @@ import (
 )
 
 func TestEveryReleasedChainHasADecoder(t *testing.T) {
-	for _, name := range []string{"bitassets", "bitnames", "coinshift", "photon", "thunder", "truthcoin"} {
+	for _, name := range []string{"bitassets", "bitnames", "coinshift", "photon", "thunder", "truthcoin", "zside"} {
 		spec, decoder, err := chain.Lookup(name)
 		if err != nil {
 			t.Errorf("lookup %s: %v", name, err)
