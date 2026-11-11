@@ -1,0 +1,25 @@
+{
+ "jsonrpc": "2.0",
+ "id": 1,
+ "result": {
+  "txs": [
+   {"txid": "1111111111111111111111111111111111111111111111111111111111111111", "size": 180, "raw": "01"}
+  ],
+  "deposits": [],
+  "bundle_spends": [
+   {
+    "outpoint": {"Regular": {"txid": "4444444444444444444444444444444444444444444444444444444444444444", "vout": 1}},
+    "m6id": "5555555555555555555555555555555555555555555555555555555555555555"
+   }
+  ],
+  "bundle_returns": [
+   {
+    "outpoint": {"UnsuccessfulWithdrawal": {"m6id": "201f1e1d1c1b1a191817161514131211100f0e0d0c0b0a090807060504030201", "height": 9, "vout": 0}},
+    "output": {
+     "address": "4VebxQ3Vy7dnutzCS3QcZ1tEkreG",
+     "content": {"Withdrawal": {"value_sats": 1000, "main_fee_sats": 250, "main_address": "bc1qsh7nudnwx7qv6ejt0x0qzumwcpp0xaf0k83axs"}}
+    }
+   }
+  ]
+ }
+}

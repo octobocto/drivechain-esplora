@@ -284,3 +284,94 @@ func TestPrepareAppliesTruthcoinMarketEntries(t *testing.T) {
 			got.Spends[2].OutPoint, got.Creates[2].OutPoint)
 	}
 }
+
+func readBlockIndex(t *testing.T, name string) chain.BlockIndex {
+	t.Helper()
+	raw, err := os.ReadFile("../chain/testdata/" + name)
+	if err != nil {
+		t.Fatalf("read %s: %v", name, err)
+	}
+	var answer struct {
+		Result chain.BlockIndex `json:"result"`
+	}
+	if err := json.Unmarshal(raw, &answer); err != nil {
+		t.Fatalf("decode %s: %v", name, err)
+	}
+	return answer.Result
+}
+
+// Thunder 0.19 creates the outputs of a failed bundle again before the body of
+// the block, so a transaction of the same block can spend one. A new bundle
+// spends its outputs at creation. The fixture holds the shape that the node's
+// get_block_index answers.
+func TestPrepareAppliesThunderBundleReturns(t *testing.T) {
+	blockIndex := readBlockIndex(t, "thunder_bundle_return_block_index.json")
+	returned := blockIndex.BundleReturns[0].OutPoint
+
+	spender := chain.Transaction{
+		Inputs:  []chain.Input{{OutPoint: returned}},
+		Outputs: []chain.Output{{Address: addr(7), Content: value(1250)}},
+	}
+	block := &chain.Block{
+		Header: chain.Header{MerkleRoot: hash(0xaa), PrevMainHash: chain.BitcoinHash(hash(0x22))},
+		Body:   chain.Body{Transactions: []chain.Transaction{spender}},
+	}
+	blockHash := hash(0xbb)
+
+	got, err := Prepare(9, blockHash, block, blockIndex, thunder.Decoder{}, nil)
+	if err != nil {
+		t.Fatalf("prepare: %v", err)
+	}
+
+	if returned.Kind != chain.KindUnsuccessfulWithdrawal || returned.Height != 9 {
+		t.Fatalf("returned outpoint = %s, want an unsuccessful withdrawal at height 9", returned)
+	}
+	var create *store.Output
+	for i := range got.Creates {
+		if got.Creates[i].OutPoint == returned {
+			create = &got.Creates[i]
+		}
+	}
+	if create == nil {
+		t.Fatalf("creates %+v, want the returned output", got.Creates)
+	}
+	if create.ValueSats != 1250 || create.ContentType != "withdrawal" {
+		t.Errorf("returned output = %d sats %q, want 1250 sats %q", create.ValueSats, create.ContentType, "withdrawal")
+	}
+
+	wantSpends := []store.Spend{
+		{OutPoint: returned, Source: blockIndex.Txs[0].Txid, Kind: chain.SpendRegular, Vin: 0},
+		{
+			OutPoint: blockIndex.BundleSpends[0].OutPoint,
+			Source:   chain.Hash(blockIndex.BundleSpends[0].M6id),
+			Kind:     chain.SpendWithdrawal,
+			Vin:      0,
+		},
+	}
+	if len(got.Spends) != len(wantSpends) {
+		t.Fatalf("records %d spends, want %d: %+v", len(got.Spends), len(wantSpends), got.Spends)
+	}
+	for i, want := range wantSpends {
+		if got.Spends[i] != want {
+			t.Errorf("spend %d = %+v, want %+v", i, got.Spends[i], want)
+		}
+	}
+}
+
+func TestPrepareRejectsABadBundleReturn(t *testing.T) {
+	output := chain.Output{Address: addr(1), Content: value(1)}
+	cases := map[string]chain.OutPoint{
+		"a regular outpoint": {Kind: chain.KindRegular, Source: hash(1)},
+		"another height":     {Kind: chain.KindUnsuccessfulWithdrawal, Source: hash(1), Height: 8},
+	}
+	for name, outpoint := range cases {
+		t.Run(name, func(t *testing.T) {
+			blockIndex := chain.BlockIndex{
+				BundleReturns: []chain.BundleReturn{{OutPoint: outpoint, Output: output}},
+			}
+			if _, err := Prepare(9, hash(2), &chain.Block{}, blockIndex, thunder.Decoder{}, nil); err == nil {
+				t.Fatalf("want an error for %s, got none", name)
+			}
+		})
+	}
+}

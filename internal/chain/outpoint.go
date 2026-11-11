@@ -8,8 +8,10 @@ import (
 	"strings"
 )
 
-// OutPointKind tags how an output came into being. The values are the borsh
-// enum discriminants, so they also index the key bytes.
+// OutPointKind tags how an output came into being. Kinds 0 to 4 are the borsh
+// enum discriminants of thunder 0.18 and of truthcoin. Thunder 0.19 gives
+// discriminant 3 to its unsuccessful withdrawal outpoint, so this index gives
+// that outpoint its own kind.
 type OutPointKind uint8
 
 const (
@@ -24,6 +26,9 @@ const (
 	// KindPayout is a truthcoin output that a market trade or settlement
 	// created.
 	KindPayout OutPointKind = 4
+	// KindUnsuccessfulWithdrawal is a thunder output that a failed or dropped
+	// withdrawal bundle created again.
+	KindUnsuccessfulWithdrawal OutPointKind = 5
 )
 
 func (k OutPointKind) String() string {
@@ -38,46 +43,81 @@ func (k OutPointKind) String() string {
 		return "market_funds"
 	case KindPayout:
 		return "payout"
+	case KindUnsuccessfulWithdrawal:
+		return "unsuccessful_withdrawal"
 	default:
 		return fmt.Sprintf("unknown(%d)", uint8(k))
 	}
 }
 
-// OutPointKeySize is the width of an OutPointKey: one discriminant byte, a
-// 32-byte hash, and a little-endian u32.
+// OutPointKeySize is the width of an OutPointKey: one kind byte, a 32-byte
+// hash, and a little-endian u32.
 const OutPointKeySize = 37
 
-// OutPointKey is the canonical borsh encoding of an OutPoint. The node uses it
-// as its own database key, and so does this index.
-type OutPointKey [OutPointKeySize]byte
+// UnsuccessfulWithdrawalKeySize is the width of the key of an unsuccessful
+// withdrawal outpoint, which also holds a little-endian u32 height.
+const UnsuccessfulWithdrawalKeySize = OutPointKeySize + 4
+
+// OutPointKey is the key that this index stores an output on. For kinds 0 to 4
+// it is the canonical borsh encoding of the outpoint.
+type OutPointKey []byte
 
 // OutPoint names one output. Source is a sidechain txid for a regular output, a
 // coinbase txid or an older node's block merkle root for a coinbase output, a
-// mainchain txid for a deposit, and the payout hash for a payout. A market funds
-// outpoint packs its fields into Source; see MarketFundsOutPoint.
+// mainchain txid for a deposit, the payout hash for a payout, and the bundle
+// m6id for an unsuccessful withdrawal. A market funds outpoint packs its fields
+// into Source; see MarketFundsOutPoint.
 type OutPoint struct {
 	Kind   OutPointKind
 	Source Hash
 	Vout   uint32
+	// Height is the sidechain height at which an unsuccessful withdrawal
+	// output came into being. It is zero for every other kind.
+	Height uint32
 }
 
-// Key returns the 37-byte form the node keys its own tables on.
+// Key returns the form this index stores the output on.
 func (o OutPoint) Key() OutPointKey {
-	var key OutPointKey
+	size := OutPointKeySize
+	if o.Kind == KindUnsuccessfulWithdrawal {
+		size = UnsuccessfulWithdrawalKeySize
+	}
+	key := make(OutPointKey, size)
 	key[0] = byte(o.Kind)
 	copy(key[1:33], o.Source[:])
-	binary.LittleEndian.PutUint32(key[33:], o.Vout)
+	if o.Kind == KindUnsuccessfulWithdrawal {
+		binary.LittleEndian.PutUint32(key[33:37], o.Height)
+		binary.LittleEndian.PutUint32(key[37:], o.Vout)
+	} else {
+		binary.LittleEndian.PutUint32(key[33:], o.Vout)
+	}
 	return key
 }
 
 // OutPointFromKey reverses Key.
 func OutPointFromKey(key OutPointKey) (OutPoint, error) {
+	if len(key) == 0 {
+		return OutPoint{}, fmt.Errorf("outpoint key is empty")
+	}
 	kind := OutPointKind(key[0])
-	if kind > KindPayout {
+	want := OutPointKeySize
+	switch {
+	case kind == KindUnsuccessfulWithdrawal:
+		want = UnsuccessfulWithdrawalKeySize
+	case kind > KindPayout:
 		return OutPoint{}, fmt.Errorf("outpoint key has unknown kind %d", key[0])
 	}
-	out := OutPoint{Kind: kind, Vout: binary.LittleEndian.Uint32(key[33:])}
+	if len(key) != want {
+		return OutPoint{}, fmt.Errorf("%s outpoint key is %d bytes, want %d", kind, len(key), want)
+	}
+	out := OutPoint{Kind: kind}
 	copy(out.Source[:], key[1:33])
+	if kind == KindUnsuccessfulWithdrawal {
+		out.Height = binary.LittleEndian.Uint32(key[33:37])
+		out.Vout = binary.LittleEndian.Uint32(key[37:])
+	} else {
+		out.Vout = binary.LittleEndian.Uint32(key[33:])
+	}
 	return out, nil
 }
 
@@ -105,13 +145,16 @@ func (o OutPoint) String() string {
 		marketID, height, isFee := o.MarketFunds()
 		return fmt.Sprintf("%s %x %d fee=%t", o.Kind, marketID, height, isFee)
 	}
+	if o.Kind == KindUnsuccessfulWithdrawal {
+		return fmt.Sprintf("%s %s %d %d", o.Kind, o.sourceString(), o.Height, o.Vout)
+	}
 	return fmt.Sprintf("%s %s %d", o.Kind, o.sourceString(), o.Vout)
 }
 
-// sourceString renders a deposit source in mainchain byte order, and every
-// other source in sidechain byte order.
+// sourceString renders a deposit source and an unsuccessful withdrawal m6id in
+// mainchain byte order, and every other source in sidechain byte order.
 func (o OutPoint) sourceString() string {
-	if o.Kind == KindDeposit {
+	if o.Kind == KindDeposit || o.Kind == KindUnsuccessfulWithdrawal {
 		return BitcoinHash(o.Source).String()
 	}
 	return o.Source.String()
@@ -125,9 +168,16 @@ type outPointWire struct {
 	Coinbase *coinbaseOutPointWire `json:"Coinbase,omitempty"`
 	// A deposit names a mainchain outpoint, which rust-bitcoin renders as one
 	// "txid:vout" string rather than as an object.
-	Deposit     *string                  `json:"Deposit,omitempty"`
-	MarketFunds *marketFundsOutPointWire `json:"MarketFunds,omitempty"`
-	Payout      *payoutOutPointWire      `json:"Payout,omitempty"`
+	Deposit                *string                             `json:"Deposit,omitempty"`
+	MarketFunds            *marketFundsOutPointWire            `json:"MarketFunds,omitempty"`
+	Payout                 *payoutOutPointWire                 `json:"Payout,omitempty"`
+	UnsuccessfulWithdrawal *unsuccessfulWithdrawalOutPointWire `json:"UnsuccessfulWithdrawal,omitempty"`
+}
+
+type unsuccessfulWithdrawalOutPointWire struct {
+	M6id   BitcoinHash `json:"m6id"`
+	Height uint32      `json:"height"`
+	Vout   uint32      `json:"vout"`
 }
 
 type payoutOutPointWire struct {
@@ -185,6 +235,13 @@ func (o *OutPoint) UnmarshalJSON(data []byte) error {
 			wire.MarketFunds.MarketID, wire.MarketFunds.BlockHeight, wire.MarketFunds.IsFee)
 	case wire.Payout != nil:
 		*o = OutPoint{Kind: KindPayout, Source: wire.Payout.Hash, Vout: wire.Payout.Vout}
+	case wire.UnsuccessfulWithdrawal != nil:
+		*o = OutPoint{
+			Kind:   KindUnsuccessfulWithdrawal,
+			Source: Hash(wire.UnsuccessfulWithdrawal.M6id),
+			Vout:   wire.UnsuccessfulWithdrawal.Vout,
+			Height: wire.UnsuccessfulWithdrawal.Height,
+		}
 	default:
 		return fmt.Errorf("outpoint %s names no known variant", data)
 	}
@@ -211,6 +268,10 @@ func (o OutPoint) MarshalJSON() ([]byte, error) {
 		}
 	case KindPayout:
 		wire.Payout = &payoutOutPointWire{Hash: o.Source, Vout: o.Vout}
+	case KindUnsuccessfulWithdrawal:
+		wire.UnsuccessfulWithdrawal = &unsuccessfulWithdrawalOutPointWire{
+			M6id: BitcoinHash(o.Source), Height: o.Height, Vout: o.Vout,
+		}
 	default:
 		return nil, fmt.Errorf("cannot encode outpoint of kind %d", uint8(o.Kind))
 	}

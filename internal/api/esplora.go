@@ -157,10 +157,11 @@ func newStatus(height uint32, hash chain.Hash, blockTime *int64) Status {
 // it names no height, no hash and no time.
 var pendingStatus = Status{Confirmed: false}
 
-// sourceString renders an outpoint source. A deposit names a mainchain txid, so
-// it keeps mainchain byte order. Everything else keeps the chain's own order.
+// sourceString renders an outpoint source. A deposit names a mainchain txid and
+// an unsuccessful withdrawal names a bundle m6id, so both keep mainchain byte
+// order. Everything else keeps the chain's own order.
 func sourceString(o chain.OutPoint) string {
-	if o.Kind == chain.KindDeposit {
+	if o.Kind == chain.KindDeposit || o.Kind == chain.KindUnsuccessfulWithdrawal {
 		return chain.BitcoinHash(o.Source).String()
 	}
 	return o.Source.String()

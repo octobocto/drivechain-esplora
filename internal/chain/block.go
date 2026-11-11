@@ -207,6 +207,9 @@ type BlockIndex struct {
 	Deposits []Deposit `json:"deposits"`
 	// BundleSpends are the outputs a withdrawal bundle removed in this block.
 	BundleSpends []BundleSpend `json:"bundle_spends"`
+	// BundleReturns are the outputs that a failed or dropped thunder
+	// withdrawal bundle created again in this block.
+	BundleReturns []BundleReturn `json:"bundle_returns"`
 	// MarketCreates are the outputs that truthcoin trades and settlement
 	// created in this block outside any transaction.
 	MarketCreates []MarketUtxo `json:"market_creates"`
@@ -220,6 +223,13 @@ type BlockIndex struct {
 // fields, because a tuple of ref schemas does not compose in the OpenAPI
 // document.
 type Deposit struct {
+	OutPoint OutPoint `json:"outpoint"`
+	Output   Output   `json:"output"`
+}
+
+// BundleReturn is one output that a failed or dropped withdrawal bundle created
+// again, at an unsuccessful withdrawal outpoint.
+type BundleReturn struct {
 	OutPoint OutPoint `json:"outpoint"`
 	Output   Output   `json:"output"`
 }
