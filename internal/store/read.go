@@ -76,7 +76,7 @@ func (s *Store) UTXOs(ctx context.Context, column string, key []byte) ([]UTXO, e
 		return nil, err
 	}
 	query := fmt.Sprintf(`
-		SELECT o.kind, o.source_id, o.vout, o.value_sats, o.height,
+		SELECT o.outpoint, o.value_sats, o.height,
 		       o.block_hash, b.block_time, o.content_type, o.content, o.height_exact
 		FROM outputs o
 		JOIN blocks b ON b.height = o.height
@@ -98,7 +98,7 @@ func (s *Store) Deposits(
 	ctx context.Context, mainchainTxid []byte, startHeight uint32, limit int,
 ) ([]UTXO, error) {
 	query := `
-		SELECT o.kind, o.source_id, o.vout, o.value_sats, o.height,
+		SELECT o.outpoint, o.value_sats, o.height,
 		       o.block_hash, b.block_time, o.content_type, o.content, o.height_exact
 		FROM outputs o
 		JOIN blocks b ON b.height = o.height
@@ -124,7 +124,7 @@ func (s *Store) Deposits(
 // AddressDeposits lists the deposits that paid one address, newest first.
 func (s *Store) AddressDeposits(ctx context.Context, address chain.Address, limit int) ([]UTXO, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT o.kind, o.source_id, o.vout, o.value_sats, o.height,
+		SELECT o.outpoint, o.value_sats, o.height,
 		       o.block_hash, b.block_time, o.content_type, o.content, o.height_exact
 		FROM outputs o
 		JOIN blocks b ON b.height = o.height
@@ -144,19 +144,19 @@ func scanUTXOs(rows pgx.Rows) ([]UTXO, error) {
 	for rows.Next() {
 		var (
 			u      UTXO
-			kind   int16
-			source []byte
+			key    []byte
 			block  []byte
-			vout   int32
 			height int32
 		)
-		if err := rows.Scan(&kind, &source, &vout, &u.ValueSats, &height,
+		if err := rows.Scan(&key, &u.ValueSats, &height,
 			&block, &u.BlockTime, &u.ContentType, &u.Content, &u.HeightExact); err != nil {
 			return nil, fmt.Errorf("read output row: %w", err)
 		}
-		u.OutPoint.Kind = chain.OutPointKind(kind)
-		u.OutPoint.Vout = uint32(vout)
-		copy(u.OutPoint.Source[:], source)
+		outpoint, err := chain.OutPointFromKey(key)
+		if err != nil {
+			return nil, fmt.Errorf("read output row: %w", err)
+		}
+		u.OutPoint = outpoint
 		copy(u.BlockHash[:], block)
 		u.Height = uint32(height)
 		out = append(out, u)

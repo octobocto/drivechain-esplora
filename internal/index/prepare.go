@@ -12,17 +12,19 @@ import (
 // touches nothing outside its arguments, so a test needs no node and no
 // database.
 //
-// A block creates coins four ways and spends them three ways:
+// A block creates coins five ways and spends them three ways:
 //
 //  1. the body coinbase, which keys on the coinbase txid, or on an older
 //     node's header merkle root
 //  2. a transaction output, which keys on its txid
 //  3. a mainchain deposit, which keys on a mainchain outpoint and never
 //     appears in the body
-//  4. a truthcoin market create, which never appears in the body
-//  5. a transaction input, which spends by txid
-//  6. a withdrawal bundle, which spends with no transaction at all
-//  7. a truthcoin market delete, which spends with no transaction at all
+//  4. a failed or dropped thunder withdrawal bundle, which creates its
+//     outputs again and never appears in the body
+//  5. a truthcoin market create, which never appears in the body
+//  6. a transaction input, which spends by txid
+//  7. a withdrawal bundle, which spends with no transaction at all
+//  8. a truthcoin market delete, which spends with no transaction at all
 //
 // A truthcoin trade that failed its price limit stays in the body, but it
 // spends and creates nothing.
@@ -92,6 +94,23 @@ func Prepare(
 		if err != nil {
 			return store.Block{}, fmt.Errorf(
 				"block %s deposit %s: %w", hash, deposit.OutPoint, err)
+		}
+		out.Creates = append(out.Creates, row)
+	}
+
+	for _, ret := range blockIndex.BundleReturns {
+		if ret.OutPoint.Kind != chain.KindUnsuccessfulWithdrawal {
+			return store.Block{}, fmt.Errorf(
+				"block %s lists a %s outpoint as a bundle return", hash, ret.OutPoint.Kind)
+		}
+		if ret.OutPoint.Height != height {
+			return store.Block{}, fmt.Errorf(
+				"block %d lists bundle return %s from another height", height, ret.OutPoint)
+		}
+		row, err := newOutput(ret.OutPoint, ret.Output, decoder, true)
+		if err != nil {
+			return store.Block{}, fmt.Errorf(
+				"block %s bundle return %s: %w", hash, ret.OutPoint, err)
 		}
 		out.Creates = append(out.Creates, row)
 	}

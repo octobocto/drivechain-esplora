@@ -222,7 +222,7 @@ func (s *Store) Outspends(ctx context.Context, txid chain.Hash) ([]Coin, error) 
 	return s.coins(ctx, `WHERE source_id = $1 AND kind = 0 ORDER BY vout`, txid[:])
 }
 
-const coinColumns = `kind, source_id, vout, address, value_sats, content, content_type,
+const coinColumns = `outpoint, address, value_sats, content, content_type,
 	height, spent_source, spent_kind, spent_height`
 
 func (s *Store) coins(ctx context.Context, where string, args ...any) ([]Coin, error) {
@@ -236,23 +236,23 @@ func (s *Store) coins(ctx context.Context, where string, args ...any) ([]Coin, e
 	for rows.Next() {
 		var (
 			c           Coin
-			kind        int16
-			source      []byte
-			vout        int32
+			key         []byte
 			address     []byte
 			height      int32
 			spentSource []byte
 			spentKind   *int16
 			spentHeight *int32
 		)
-		if err := rows.Scan(&kind, &source, &vout, &address, &c.ValueSats,
+		if err := rows.Scan(&key, &address, &c.ValueSats,
 			&c.Content, &c.ContentType, &height,
 			&spentSource, &spentKind, &spentHeight); err != nil {
 			return nil, fmt.Errorf("read coin row: %w", err)
 		}
-		c.OutPoint.Kind = chain.OutPointKind(kind)
-		c.OutPoint.Vout = uint32(vout)
-		copy(c.OutPoint.Source[:], source)
+		outpoint, err := chain.OutPointFromKey(key)
+		if err != nil {
+			return nil, fmt.Errorf("read coin row: %w", err)
+		}
+		c.OutPoint = outpoint
 		copy(c.Address[:], address)
 		c.Height = uint32(height)
 		if len(spentSource) == len(chain.Hash{}) {

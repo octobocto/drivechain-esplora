@@ -523,3 +523,61 @@ func TestARepeatedTransactionDoesNotStopTheIndex(t *testing.T) {
 		t.Errorf("transaction height = %d, want 219 — the block that carried it first", tx.Height)
 	}
 }
+
+// An unsuccessful withdrawal outpoint holds a height that no column holds. The
+// store reads every outpoint back from its key, so the height survives, and a
+// later spend finds the row.
+func TestABundleReturnKeepsItsHeight(t *testing.T) {
+	ctx := context.Background()
+	st := openStore(t)
+
+	alice := addr(1)
+	bob := addr(2)
+	m6id := hash(0x99)
+	returned := chain.OutPoint{
+		Kind:   chain.KindUnsuccessfulWithdrawal,
+		Source: m6id,
+		Height: 0,
+		Vout:   0,
+	}
+
+	first := block(0, hash(0xa0), nil)
+	first.Creates = []store.Output{output(returned, alice, 1250)}
+	if _, err := st.Apply(ctx, first); err != nil {
+		t.Fatalf("apply first: %v", err)
+	}
+
+	utxos, err := st.UTXOs(ctx, store.ColumnAddress, alice[:])
+	if err != nil {
+		t.Fatalf("utxos: %v", err)
+	}
+	if len(utxos) != 1 || utxos[0].OutPoint != returned {
+		t.Fatalf("alice holds %+v, want the returned output %s", utxos, returned)
+	}
+
+	txid := hash(0x22)
+	prev := first.Hash
+	second := block(1, hash(0xa1), &prev)
+	second.Txs = []store.Tx{{Txid: txid, Raw: []byte{2}}}
+	second.Creates = []store.Output{output(regular(txid, 0), bob, 1250)}
+	second.Spends = []store.Spend{{
+		OutPoint: returned,
+		Source:   txid,
+		Kind:     chain.SpendRegular,
+	}}
+	result, err := st.Apply(ctx, second)
+	if err != nil {
+		t.Fatalf("apply second: %v", err)
+	}
+	if result.UnknownSpends != 0 {
+		t.Errorf("reported %d unknown spends, want 0", result.UnknownSpends)
+	}
+
+	tx, err := st.Tx(ctx, txid)
+	if err != nil {
+		t.Fatalf("read transaction: %v", err)
+	}
+	if len(tx.Vin) != 1 || tx.Vin[0].OutPoint != returned {
+		t.Errorf("transaction spends %+v, want the returned output %s", tx.Vin, returned)
+	}
+}

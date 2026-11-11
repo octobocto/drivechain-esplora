@@ -58,10 +58,94 @@ func TestOutPointKeyLayout(t *testing.T) {
 }
 
 func TestOutPointFromKeyRejectsUnknownKind(t *testing.T) {
-	var key OutPointKey
+	key := make(OutPointKey, OutPointKeySize)
 	key[0] = 7
 	if _, err := OutPointFromKey(key); err == nil {
 		t.Fatal("want an error for kind 7, got none")
+	}
+}
+
+// An unsuccessful withdrawal outpoint holds a height as well as a vout, so its
+// key is 4 bytes longer. Every other kind keeps the 37-byte key that older
+// rows carry.
+func TestUnsuccessfulWithdrawalKeyLayout(t *testing.T) {
+	out := OutPoint{
+		Kind:   KindUnsuccessfulWithdrawal,
+		Source: mustHash(t, testHashHex),
+		Height: 258,
+		Vout:   1,
+	}
+	key := out.Key()
+	if len(key) != UnsuccessfulWithdrawalKeySize {
+		t.Fatalf("key is %d bytes, want %d", len(key), UnsuccessfulWithdrawalKeySize)
+	}
+	want := "05" + testHashHex + "02010000" + "01000000"
+	if got := hex.EncodeToString(key); got != want {
+		t.Errorf("key = %s, want %s", got, want)
+	}
+	back, err := OutPointFromKey(key)
+	if err != nil {
+		t.Fatalf("read key back: %v", err)
+	}
+	if back != out {
+		t.Errorf("round trip = %+v, want %+v", back, out)
+	}
+}
+
+func TestOutPointFromKeyRejectsAWrongLength(t *testing.T) {
+	cases := map[string]OutPointKey{
+		"empty":                         {},
+		"short regular":                 make(OutPointKey, OutPointKeySize-1),
+		"regular with a height":         make(OutPointKey, UnsuccessfulWithdrawalKeySize),
+		"unsuccessful withdrawal short": append(OutPointKey{byte(KindUnsuccessfulWithdrawal)}, make([]byte, OutPointKeySize-1)...),
+	}
+	for name, key := range cases {
+		t.Run(name, func(t *testing.T) {
+			if _, err := OutPointFromKey(key); err == nil {
+				t.Fatal("want an error, got none")
+			}
+		})
+	}
+}
+
+// Thunder 0.19 names the m6id with rust-bitcoin's reversed hex, as a bundle
+// spend does, so both decode to the same Source.
+func TestUnsuccessfulWithdrawalOutPointJSON(t *testing.T) {
+	const mainHex = "201f1e1d1c1b1a191817161514131211100f0e0d0c0b0a090807060504030201"
+	const sideHex = "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20"
+	wire := `{"UnsuccessfulWithdrawal":{"m6id":"` + mainHex + `","height":7,"vout":2}}`
+
+	var got OutPoint
+	if err := json.Unmarshal([]byte(wire), &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	want := OutPoint{
+		Kind:   KindUnsuccessfulWithdrawal,
+		Source: mustHash(t, sideHex),
+		Height: 7,
+		Vout:   2,
+	}
+	if got != want {
+		t.Fatalf("decode = %+v, want %+v", got, want)
+	}
+
+	var spend InPoint
+	if err := json.Unmarshal([]byte(`{"Withdrawal":{"m6id":"`+mainHex+`"}}`), &spend); err != nil {
+		t.Fatalf("decode bundle spend: %v", err)
+	}
+	if spend.Source != got.Source {
+		t.Errorf("bundle spend m6id = %s, outpoint m6id = %s", spend.Source, got.Source)
+	}
+
+	out, err := json.Marshal(got)
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	if string(out) != wire {
+		t.Errorf("encode = %s, want %s", out, wire)
+	}
+	if text, want := got.String(), "unsuccessful_withdrawal "+mainHex+" 7 2"; text != want {
+		t.Errorf("String() = %q, want %q", text, want)
 	}
 }
 

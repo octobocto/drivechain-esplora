@@ -206,7 +206,7 @@ func (s *Store) MempoolUTXOs(ctx context.Context, column string, key []byte) ([]
 		return nil, err
 	}
 	query := fmt.Sprintf(`
-		SELECT m.kind, m.source_id, m.vout, m.value_sats, m.content_type, m.content
+		SELECT m.outpoint, m.value_sats, m.content_type, m.content
 		FROM mempool_outputs m
 		LEFT JOIN mempool_spends s ON s.outpoint = m.outpoint
 		WHERE m.%s = $1 AND s.outpoint IS NULL
@@ -221,17 +221,17 @@ func (s *Store) MempoolUTXOs(ctx context.Context, column string, key []byte) ([]
 	var out []UTXO
 	for rows.Next() {
 		var (
-			u      UTXO
-			kind   int16
-			source []byte
-			vout   uint32
+			u   UTXO
+			key []byte
 		)
-		if err := rows.Scan(&kind, &source, &vout, &u.ValueSats, &u.ContentType, &u.Content); err != nil {
+		if err := rows.Scan(&key, &u.ValueSats, &u.ContentType, &u.Content); err != nil {
 			return nil, fmt.Errorf("scan mempool utxo: %w", err)
 		}
-		u.OutPoint.Kind = chain.OutPointKind(kind)
-		copy(u.OutPoint.Source[:], source)
-		u.OutPoint.Vout = vout
+		outpoint, err := chain.OutPointFromKey(key)
+		if err != nil {
+			return nil, fmt.Errorf("scan mempool utxo: %w", err)
+		}
+		u.OutPoint = outpoint
 		u.Unconfirmed = true
 		out = append(out, u)
 	}
@@ -334,12 +334,12 @@ func (s *Store) MempoolTxRow(ctx context.Context, txid chain.Hash) (TxRow, error
 	out.Unconfirmed = true
 
 	out.Vin, err = s.mempoolCoins(ctx, `
-		SELECT s.vin, o.kind, o.source_id, o.vout, o.address, o.value_sats,
+		SELECT s.vin, o.outpoint, o.address, o.value_sats,
 		       o.content, o.content_type
 		FROM mempool_spends s JOIN outputs o ON o.outpoint = s.outpoint
 		WHERE s.source = $1 AND s.kind = 0
 		UNION ALL
-		SELECT s.vin, m.kind, m.source_id, m.vout, m.address, m.value_sats,
+		SELECT s.vin, m.outpoint, m.address, m.value_sats,
 		       m.content, m.content_type
 		FROM mempool_spends s JOIN mempool_outputs m ON m.outpoint = s.outpoint
 		WHERE s.source = $1 AND s.kind = 0
@@ -349,7 +349,7 @@ func (s *Store) MempoolTxRow(ctx context.Context, txid chain.Hash) (TxRow, error
 	}
 
 	out.Vout, err = s.mempoolCoins(ctx, `
-		SELECT vout, kind, source_id, vout, address, value_sats, content, content_type
+		SELECT vout, outpoint, address, value_sats, content, content_type
 		FROM mempool_outputs WHERE source_id = $1 AND kind = 0
 		ORDER BY vout`, txid[:])
 	if err != nil {
@@ -372,18 +372,18 @@ func (s *Store) mempoolCoins(ctx context.Context, query string, args ...any) ([]
 		var (
 			c       Coin
 			order   int32
-			kind    int16
-			source  []byte
-			vout    int32
+			key     []byte
 			address []byte
 		)
-		if err := rows.Scan(&order, &kind, &source, &vout, &address,
+		if err := rows.Scan(&order, &key, &address,
 			&c.ValueSats, &c.Content, &c.ContentType); err != nil {
 			return nil, fmt.Errorf("read mempool coin row: %w", err)
 		}
-		c.OutPoint.Kind = chain.OutPointKind(kind)
-		c.OutPoint.Vout = uint32(vout)
-		copy(c.OutPoint.Source[:], source)
+		outpoint, err := chain.OutPointFromKey(key)
+		if err != nil {
+			return nil, fmt.Errorf("read mempool coin row: %w", err)
+		}
+		c.OutPoint = outpoint
 		copy(c.Address[:], address)
 		out = append(out, c)
 	}

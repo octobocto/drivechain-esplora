@@ -155,3 +155,35 @@ func TestPrepareReadsARealTruthcoinBlock(t *testing.T) {
 		}
 	}
 }
+
+// Thunder 0.19 names its coinbase with an object and keys a coinbase output on
+// the coinbase txid. Block 28 of the eCash chain spends a deposit. The node
+// lists its coinbase output at the txid below.
+func TestPrepareReadsARealThunder019Block(t *testing.T) {
+	block := readRealBlock(t, "thunder_0_19_block.json")
+
+	got, err := Prepare(28, hash(0xc2), block, namesFor(block), thunder.Decoder{}, nil)
+	if err != nil {
+		t.Fatalf("prepare: %v", err)
+	}
+
+	wantCoinbase, err := chain.ParseHash("e8895842b871fe14ebbece0fb4a4ff11a66e423acf5223642b58f89a395d3826")
+	if err != nil {
+		t.Fatalf("parse coinbase txid: %v", err)
+	}
+	wantSats := []int64{1000, 50000000, 49999000}
+	if len(got.Creates) != len(wantSats) {
+		t.Fatalf("creates %d outputs, want %d", len(got.Creates), len(wantSats))
+	}
+	for i, want := range wantSats {
+		if got.Creates[i].ValueSats != want {
+			t.Errorf("output %d holds %d sats, want %d", i, got.Creates[i].ValueSats, want)
+		}
+	}
+	if coinbase := got.Creates[0].OutPoint; coinbase.Kind != chain.KindCoinbase || coinbase.Source != wantCoinbase {
+		t.Errorf("coinbase outpoint = %s, want coinbase %s 0", coinbase, wantCoinbase)
+	}
+	if len(got.Spends) != 1 || got.Spends[0].OutPoint.Kind != chain.KindDeposit {
+		t.Errorf("spends = %+v, want one deposit spend", got.Spends)
+	}
+}

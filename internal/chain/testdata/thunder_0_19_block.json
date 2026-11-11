@@ -1,0 +1,171 @@
+{
+ "jsonrpc": "2.0",
+ "id": 1,
+ "result": {
+  "header": {
+   "merkle_root": "c7a44d4f68460db65c52975b2774b21805436861429479f2fd45baa3c594c2b2",
+   "prev_side_hash": "1ffa0aa427e123adf2238332b11c4f55c1129b1e1b390b339ac716f27067e765",
+   "prev_main_hash": "000000000000000002eca27dc6c3778dd65862cbef3d125cda349c8ef575ed8f",
+   "roots": [
+    "36dbac75fd0aa35b7f614326c5932a3fb11fd1e7188a5f23322ab9c338256ebb"
+   ]
+  },
+  "body": {
+   "coinbase": {
+    "memo": [],
+    "outputs": [
+     {
+      "address": "4VebxQ3Vy7dnutzCS3QcZ1tEkreG",
+      "content": {
+       "Value": 1000
+      }
+     }
+    ]
+   },
+   "transactions": [
+    {
+     "inputs": [
+      [
+       {
+        "Deposit": "ef3a2a65877821492cfa27390840a667432e9b816f6ce927d140058b35888ced:0"
+       },
+       [
+        178,
+        91,
+        140,
+        131,
+        226,
+        55,
+        101,
+        219,
+        121,
+        106,
+        105,
+        226,
+        240,
+        50,
+        54,
+        7,
+        172,
+        24,
+        89,
+        131,
+        114,
+        205,
+        174,
+        186,
+        184,
+        190,
+        214,
+        205,
+        183,
+        69,
+        78,
+        19
+       ]
+      ]
+     ],
+     "proof": {
+      "targets": [
+       3
+      ],
+      "hashes": [
+       {
+        "Some": [
+         184,
+         138,
+         199,
+         0,
+         191,
+         129,
+         28,
+         242,
+         128,
+         142,
+         88,
+         212,
+         228,
+         253,
+         12,
+         113,
+         124,
+         181,
+         214,
+         219,
+         90,
+         190,
+         5,
+         181,
+         87,
+         154,
+         51,
+         90,
+         46,
+         142,
+         74,
+         40
+        ]
+       },
+       {
+        "Some": [
+         159,
+         57,
+         76,
+         208,
+         111,
+         43,
+         63,
+         110,
+         59,
+         72,
+         72,
+         250,
+         27,
+         252,
+         72,
+         213,
+         201,
+         19,
+         218,
+         71,
+         237,
+         146,
+         195,
+         184,
+         142,
+         62,
+         134,
+         118,
+         65,
+         62,
+         111,
+         28
+        ]
+       }
+      ]
+     },
+     "outputs": [
+      {
+       "address": "45qzNvmWgCcfD2C7dyK2YvYcFCLs",
+       "content": {
+        "Value": 50000000
+       }
+      },
+      {
+       "address": "4VebxQ3Vy7dnutzCS3QcZ1tEkreG",
+       "content": {
+        "Value": 49999000
+       }
+      }
+     ]
+    }
+   ],
+   "authorizations": [
+    {
+     "verifying_key": "4a85c3d94d61f221587e9a34d204e2f63e9f22cf6c63ad630f270f27758df32d",
+     "signature": "0a4883a3758351fbd53edceaa2149c03eeac42d23adbc4c55c5471f5c44e9d22612f96919cbe015e529f2d66cb4a4158ae41f4249aac2081774a9c8abd34490a"
+    }
+   ]
+  }
+ }
+}
